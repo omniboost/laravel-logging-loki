@@ -259,10 +259,12 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             $tempKey = self::BUFFER_KEY . ':flushing:' . uniqid();
             
             // RENAME is atomic - moves buffer to temp key and clears original
-            $renamed = Redis::rename(self::BUFFER_KEY, $tempKey);
-            
-            if (!$renamed) {
-                return; // Buffer was already cleared
+            // Redis throws an exception if source key doesn't exist
+            try {
+                Redis::rename(self::BUFFER_KEY, $tempKey);
+            } catch (\RedisException $e) {
+                // Key doesn't exist - another process already flushed it
+                return;
             }
 
             // Now read from the temporary key (no race condition possible)
@@ -280,9 +282,6 @@ class LokiBufferedHandler extends AbstractProcessingHandler
 
             // Flush buffer
             $this->flushBuffer($decodedBuffer);
-        } catch (\Exception $e) {
-            // If rename fails because key doesn't exist, that's okay
-            // Another process may have already flushed it
         } finally {
             $lock->release();
         }
