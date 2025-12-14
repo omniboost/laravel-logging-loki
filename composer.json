@@ -1,0 +1,30 @@
+{
+    "name": "omniboost/laravel-logging-loki",
+    "description": "Loki logger for Laravel applications using buffers & jobs",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Omniboost\\LaravelLoggingLoki\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Bart Versluijs",
+            "email": "bartversluijs@icloud.com"
+        }
+    ],
+    "require": {
+        "php": "^8.1|^8.2|^8.3",
+        "illuminate/support": "^10.0|^11.0",
+        "illuminate/queue": "^10.0|^11.0",
+        "guzzlehttp/guzzle": "^7.0",
+        "monolog/monolog": "^3.0"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Omniboost\\LaravelLoggingLoki\\LokiServiceProvider"
+            ]
+        }
+    }
+}
