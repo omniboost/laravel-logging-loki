@@ -7,6 +7,7 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 - ✅ **Buffered Logging**: Collects logs in memory before sending to reduce API calls
 - ✅ **Non-blocking**: Uses Laravel Jobs to send logs in the background
 - ✅ **Automatic Flushing**: Flushes based on buffer size or time interval
+- ✅ **Thread-Safe**: Race-condition protected buffer management ensures no log loss under concurrent access
 - ✅ **Configurable**: Extensive configuration options for buffer size, intervals, labels, etc.
 - ✅ **Resilient**: Automatic retries on failure with exponential backoff
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
@@ -265,6 +266,22 @@ php artisan queue:retry all
 - **Flush Interval**: Shorter intervals = more real-time but more API calls
 - **Queue**: Use Redis or database queue for reliability in production
 - **Non-blocking**: All Loki communication happens in background jobs
+
+## Thread Safety and Concurrency
+
+This library is designed to handle high-concurrency scenarios safely:
+
+- **Atomic Buffer Operations**: Uses Redis RENAME or cache locks to atomically extract and clear the buffer during flush, preventing race conditions
+- **No Log Loss**: Logs arriving during a flush operation are safely stored in a fresh buffer, not lost
+- **Lock-based Coordination**: Distributed locks prevent multiple processes from flushing simultaneously
+- **Redis Optimized**: When using Redis as the cache driver, atomic operations provide better performance without lock contention
+- **Fallback Safety**: For non-Redis cache drivers, exclusive locks ensure thread-safe buffer access
+
+**Best Practices for High-Traffic Applications:**
+1. Use Redis as your cache driver for better performance under high concurrency
+2. Configure appropriate buffer sizes to balance between API calls and memory usage
+3. Monitor your queue workers to ensure logs are processed timely
+4. Consider using multiple queue workers to handle high log volumes
 
 ## Requirements
 

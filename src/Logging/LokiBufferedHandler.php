@@ -119,8 +119,8 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 Cache::put(self::BUFFER_KEY, $buffer);
 
                 if ($this->shouldFlush(count($buffer))) {
-                    // Flush the buffer we have
-                    $this->flush($buffer);
+                    // Trigger flush (will handle its own locking)
+                    $this->flush();
                 }
             });
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
@@ -171,10 +171,8 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     protected function flushBuffer(array $buffer): void
     {
         // Dispatch job to send logs to Loki asynchronously
+        // Note: Buffer should already be cleared atomically before this is called
         SendLogsToLoki::dispatch($buffer, $this->url, $this->username, $this->password);
-
-        // Clear buffer and update last flush time
-        Cache::forget(self::BUFFER_KEY);
     }
 
     /**
@@ -256,13 +254,22 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 return;
             }
 
-            // Atomically get all items and delete the list
-            $results = Redis::pipeline(function ($pipe) {
-                $pipe->lrange(self::BUFFER_KEY, 0, -1);
-                $pipe->del(self::BUFFER_KEY);
-            });
+            // Atomically get all items and delete the list using a unique temporary key
+            // This prevents race conditions where new logs are added during flush
+            $tempKey = self::BUFFER_KEY . ':flushing:' . uniqid();
+            
+            // RENAME is atomic - moves buffer to temp key and clears original
+            $renamed = Redis::rename(self::BUFFER_KEY, $tempKey);
+            
+            if (!$renamed) {
+                return; // Buffer was already cleared
+            }
 
-            $buffer = $results[0] ?? [];
+            // Now read from the temporary key (no race condition possible)
+            $buffer = Redis::lrange($tempKey, 0, -1);
+            
+            // Delete the temporary key
+            Redis::del($tempKey);
 
             if (empty($buffer)) {
                 return;
@@ -273,6 +280,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
 
             // Flush buffer
             $this->flushBuffer($decodedBuffer);
+        } catch (\Exception $e) {
+            // If rename fails because key doesn't exist, that's okay
+            // Another process may have already flushed it
         } finally {
             $lock->release();
         }
@@ -287,17 +297,23 @@ class LokiBufferedHandler extends AbstractProcessingHandler
 
         try {
             // Try to get the lock.
-            // If not succesful, the flush is already busy.
+            // If not successful, the flush is already busy.
             if ($lock->get()) {
+                // Atomically extract and clear the buffer within the lock
                 $buffer = Cache::get(self::BUFFER_KEY, []);
+                
                 if (empty($buffer)) {
                     return;
                 }
 
+                // Clear the buffer BEFORE dispatching the job
+                // This prevents race condition where new logs arrive during job dispatch
+                Cache::forget(self::BUFFER_KEY);
+
                 // Convert buffer to LokiLogEntry objects
                 $decodedBuffer = array_map(fn($item) => LokiLogEntry::fromArray($item), $buffer);
 
-                // Flush buffer
+                // Flush buffer (dispatch job)
                 $this->flushBuffer($decodedBuffer);
             }
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
