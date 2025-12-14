@@ -109,19 +109,18 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     {
         // Use cache lock to prevent race conditions
         $lock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
+        $shouldFlush = false;
 
         try {
             // Try to acquire lock with 5 second timeout
-            $lock->block(5, function () use ($logEntry) {
+            $lock->block(5, function () use ($logEntry, &$shouldFlush) {
                 // Add log entry to buffer
                 $buffer = Cache::get(self::BUFFER_KEY, []);
                 $buffer[] = $logEntry->toArray();
                 Cache::put(self::BUFFER_KEY, $buffer);
 
-                if ($this->shouldFlush(count($buffer))) {
-                    // Trigger flush (will handle its own locking)
-                    $this->flush();
-                }
+                // Check if we should flush (but don't flush while holding the buffer lock)
+                $shouldFlush = $this->shouldFlush(count($buffer));
             });
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
             // If we can't get the lock, just skip this log entry
@@ -129,6 +128,11 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Alternative: could log to a fallback channel
         } finally {
             optional($lock)->release();
+        }
+
+        // Trigger flush AFTER releasing the buffer lock to avoid holding multiple locks
+        if ($shouldFlush) {
+            $this->flush();
         }
     }
 
@@ -264,6 +268,8 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 Redis::rename(self::BUFFER_KEY, $tempKey);
             } catch (\RedisException $e) {
                 // Key doesn't exist - another process already flushed it
+                // Or other Redis errors (connection, permissions, etc.)
+                // Either way, we can't flush, so return
                 return;
             }
 
