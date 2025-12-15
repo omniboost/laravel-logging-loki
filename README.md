@@ -4,11 +4,12 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 
 ## Features
 
-- ✅ **Buffered Logging**: Collects logs in memory before sending to reduce API calls
+- ✅ **Dual-Layer Buffering**: In-memory buffer → cache buffer → Loki (optimized performance)
 - ✅ **Non-blocking**: Uses Laravel Jobs to send logs in the background
-- ✅ **Automatic Flushing**: Flushes based on buffer size or time interval
+- ✅ **Automatic Flushing**: Flushes based on buffer size or time interval (both layers)
 - ✅ **Thread-Safe**: Race-condition protected buffer management ensures no log loss under concurrent access
-- ✅ **Configurable**: Extensive configuration options for buffer size, intervals, labels, etc.
+- ✅ **Reliable Persistence**: Shutdown handlers ensure logs are flushed on process termination
+- ✅ **Configurable**: Extensive configuration options for buffer sizes, intervals, labels, etc.
 - ✅ **Resilient**: Automatic retries on failure with exponential backoff
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
 - ✅ **Debug Mode**: Optional debug logging for troubleshooting
@@ -33,6 +34,8 @@ php artisan vendor:publish --tag=loki-config
 LOKI_URL=http://localhost:3100
 LOKI_USERNAME=
 LOKI_PASSWORD=
+LOKI_MEMORY_BUFFER_SIZE=10
+LOKI_MEMORY_FLUSH_INTERVAL=1.0
 LOKI_BUFFER_SIZE=100
 LOKI_FLUSH_INTERVAL=5.0
 LOKI_QUEUE=default
@@ -55,6 +58,8 @@ Add the Loki channel to your `config/logging.php`:
         'driver' => 'loki',
         'url' => env('LOKI_URL', 'http://localhost:3100'),
         'level' => env('LOKI_LOG_LEVEL', 'debug'),
+        'memory_buffer_size' => env('LOKI_MEMORY_BUFFER_SIZE', 10),
+        'memory_flush_interval' => env('LOKI_MEMORY_FLUSH_INTERVAL', 1.0),
         'buffer_size' => env('LOKI_BUFFER_SIZE', 100),
         'flush_interval' => env('LOKI_FLUSH_INTERVAL', 5.0),
         'username' => env('LOKI_USERNAME'),
@@ -176,14 +181,38 @@ Log::stack(['loki', 'slack'])->critical('Critical error occurred!');
 
 ## How It Works
 
-1. **Buffering**: When you log something, it's added to an in-memory buffer
-2. **Flushing**: The buffer is automatically flushed when:
-   - It reaches the configured `buffer_size` (default: 100 logs)
-   - The `flush_interval` time passes (default: 5 seconds)
-   - The application terminates
-3. **Job Dispatching**: When flushed, logs are dispatched to a Laravel Job
-4. **Background Processing**: The job sends logs to Loki in the background
-5. **Retries**: If sending fails, the job retries up to 3 times with backoff
+### Dual-Layer Buffering Architecture
+
+This library uses a two-tier buffering system for optimal performance:
+
+1. **In-Memory Buffer** (First Layer - Fast)
+   - Logs are first added to an in-memory array
+   - Minimal overhead, no I/O operations
+   - Flushes to cache when:
+     - Memory buffer size threshold reached (default: 10 logs)
+     - Memory flush interval elapsed (default: 1.0 seconds)
+     - Process termination (`register_shutdown_function`)
+     - Handler destructor called
+
+2. **Cache Buffer** (Second Layer - Persistent)
+   - In-memory logs are batched and written to cache (Redis/Laravel Cache)
+   - Thread-safe with locks for concurrent access
+   - Flushes to queue when:
+     - Cache buffer size threshold reached (default: 100 logs)
+     - Cache flush interval elapsed (default: 5.0 seconds)
+
+3. **Job Dispatching**: Cache buffer dispatches logs to Laravel Job for async processing
+
+4. **Background Processing**: The job sends logs to Loki via HTTP in the background
+
+5. **Retries**: If sending fails, the job retries up to 3 times with exponential backoff
+
+### Benefits of Dual-Layer Buffering
+
+- **Better Performance**: Reduces cache write operations by batching logs in memory first
+- **No Log Loss**: Shutdown handlers ensure memory buffer is flushed on process end
+- **Lower Latency**: In-memory operations are much faster than cache I/O
+- **Reduced Infrastructure Load**: Fewer writes to Redis/cache layer
 
 ## Configuration Options
 
@@ -192,8 +221,10 @@ Log::stack(['loki', 'slack'])->critical('Critical error occurred!');
 | `url` | Loki server URL | `http://localhost:3100` |
 | `username` | Basic auth username (optional) | `null` |
 | `password` | Basic auth password (optional) | `null` |
-| `buffer_size` | Number of logs before flushing | `100` |
-| `flush_interval` | Seconds before auto-flush | `5.0` |
+| `memory_buffer_size` | Logs to buffer in memory before cache write | `10` |
+| `memory_flush_interval` | Seconds before flushing memory buffer | `1.0` |
+| `buffer_size` | Logs to buffer in cache before queue dispatch | `100` |
+| `flush_interval` | Seconds before flushing cache buffer | `5.0` |
 | `queue` | Queue to use for background jobs | `default` |
 | `level` | Minimum log level | `debug` |
 | `debug` | Enable debug logging | `false` |
@@ -254,12 +285,16 @@ Filter by custom labels:
 
 ### High memory usage
 
-Reduce buffer size:
+Adjust buffer sizes to reduce memory footprint:
 
 ```env
+LOKI_MEMORY_BUFFER_SIZE=5
+LOKI_MEMORY_FLUSH_INTERVAL=0.5
 LOKI_BUFFER_SIZE=50
 LOKI_FLUSH_INTERVAL=3.0
 ```
+
+**Note**: The memory buffer is typically very small (10 logs default), so memory usage is minimal. If you're experiencing high memory, it's more likely from the cache buffer or other application code.
 
 ### Job failures
 
@@ -283,31 +318,49 @@ php artisan queue:retry all
 └──────┬──────┘
        │ Log::info()
        ▼
-┌──────────────────┐
-│ LokiBufferedHandler │ ◄─── Buffers logs in memory
-└──────┬──────────┘
-       │ Buffer full or time elapsed
+┌──────────────────────┐
+│   In-Memory Buffer   │ ◄─── Fast: 10 logs (1s interval)
+└──────┬───────────────┘
+       │ Memory buffer full or time elapsed
        ▼
-┌──────────────────┐
-│ SendLogsToLoki   │ ◄─── Laravel Job (queued)
-│      Job         │
-└──────┬──────────┘
+┌──────────────────────┐
+│    Cache Buffer      │ ◄─── Persistent: Redis/Cache (100 logs, 5s interval)
+│  (Redis/Laravel)     │
+└──────┬───────────────┘
+       │ Cache buffer full or time elapsed
+       ▼
+┌──────────────────────┐
+│  SendLogsToLoki Job  │ ◄─── Laravel Job (queued)
+└──────┬───────────────┘
        │ Background processing
        ▼
-┌──────────────────┐
-│   LokiClient     │ ◄─── HTTP client
-└──────┬──────────┘
+┌──────────────────────┐
+│     LokiClient       │ ◄─── HTTP client
+└──────┬───────────────┘
        │ HTTP POST
        ▼
-┌──────────────────┐
-│  Grafana Loki    │
-└──────────────────┘
+┌──────────────────────┐
+│   Grafana Loki       │
+└──────────────────────┘
 ```
 
 ## Performance Considerations
 
-- **Buffer Size**: Larger buffers = fewer API calls but more memory usage
-- **Flush Interval**: Shorter intervals = more real-time but more API calls
+### Dual-Layer Buffer Tuning
+
+- **Memory Buffer**: Small, fast, in-process (default: 10 logs, 1s)
+  - Increase size for better batching: `LOKI_MEMORY_BUFFER_SIZE=20`
+  - Decrease interval for more real-time: `LOKI_MEMORY_FLUSH_INTERVAL=0.5`
+  
+- **Cache Buffer**: Larger, persistent, cross-process (default: 100 logs, 5s)
+  - Increase size for fewer queue jobs: `LOKI_BUFFER_SIZE=200`
+  - Decrease interval for more frequent flushing: `LOKI_FLUSH_INTERVAL=3.0`
+
+- **Trade-offs**:
+  - Larger buffers = fewer writes to cache/queue but slightly higher memory usage
+  - Shorter intervals = more real-time logs but more overhead
+  - Dual buffering reduces cache writes by ~10x (default: 10 logs batched per cache write)
+
 - **Queue**: Use Redis or database queue for reliability in production
 - **Non-blocking**: All Loki communication happens in background jobs
 
@@ -315,10 +368,16 @@ php artisan queue:retry all
 
 This library is designed to handle high-concurrency scenarios safely:
 
-- **Atomic Buffer Operations (Redis)**: When using Redis as the cache driver, atomic extraction and clearing of the buffer is guaranteed using Redis RENAME. For non-Redis cache drivers, exclusive locks are used to provide thread safety.
+### In-Memory Buffer (First Layer)
+- **Process-Local**: Each PHP process has its own in-memory buffer (no cross-process conflicts)
+- **No Locking Needed**: Since it's in-process, no locks are required
+- **Reliable Flushing**: Shutdown handlers and destructors ensure buffer is flushed on process termination
+
+### Cache Buffer (Second Layer)
+- **Atomic Buffer Operations (Redis)**: When using Redis as the cache driver, atomic extraction and clearing of the buffer is guaranteed using Redis operations. For non-Redis cache drivers, exclusive locks are used to provide thread safety.
 - **No Log Loss (Redis)**: When using Redis as the cache driver, logs arriving during a flush operation are safely stored in a fresh buffer and are not lost, thanks to atomic operations.
 - **Caveat for Non-Redis Cache Drivers**: With non-Redis cache drivers, while exclusive locks ensure thread-safe buffer access, there is a minimal risk of log loss under extreme concurrency scenarios. For strict "no log loss" guarantees, use Redis as your cache driver.
-- **Lock-based Coordination**: Distributed locks prevent multiple processes from accessing the buffer simultaneously
+- **Lock-based Coordination**: Distributed locks prevent multiple processes from accessing the cache buffer simultaneously
 - **Redis Optimized**: When using Redis as the cache driver, atomic operations provide better performance without lock contention
 
 **Best Practices for High-Traffic Applications:**

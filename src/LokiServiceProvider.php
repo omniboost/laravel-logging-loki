@@ -41,7 +41,9 @@ class LokiServiceProvider extends ServiceProvider
                 username: $config['username'] ?? config('loki.username'),
                 password: $config['password'] ?? config('loki.password'),
                 structuredMetadataPrefix: $config['structured_metadata_prefix'] ?? config('loki.structured_metadata_prefix', ''),
-                bubble: $config['bubble'] ?? true
+                bubble: $config['bubble'] ?? true,
+                memoryBufferSize: $config['memory_buffer_size'] ?? config('loki.memory_buffer_size', 10),
+                memoryFlushInterval: $config['memory_flush_interval'] ?? config('loki.memory_flush_interval', 1.0)
             );
 
             // Optionally set custom formatter
