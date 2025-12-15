@@ -6,7 +6,8 @@ use Monolog\Level;
 use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
-use PHPUnit\Framework\TestCase;
+use Omniboost\LaravelLoggingLoki\LokiServiceProvider;
+use Orchestra\Testbench\TestCase;
 use ReflectionClass;
 use DateTime;
 
@@ -22,6 +23,51 @@ class StructuredMetadataTest extends TestCase
     {
         parent::setUp();
         fwrite(STDERR, "\n");
+    }
+
+    protected function tearDown(): void
+    {
+        // Manually flush all handler instances while Laravel container is still available
+        // This prevents shutdown handler from running after Laravel is torn down
+        $reflection = new ReflectionClass(LokiBufferedHandler::class);
+        $instancesProperty = $reflection->getProperty('handlerInstances');
+        $instancesProperty->setAccessible(true);
+        $instances = $instancesProperty->getValue();
+        
+        foreach ($instances as $handler) {
+            if ($handler instanceof LokiBufferedHandler) {
+                try {
+                    $handler->flushMemoryBuffer();
+                } catch (\Throwable $e) {
+                    // Ignore flush errors during teardown - handler might try to send logs to Loki
+                }
+            }
+        }
+        
+        // Clear the instances array to prevent shutdown handler from running
+        $instancesProperty->setValue(null, []);
+        
+        parent::tearDown();
+    }
+
+    /**
+     * Get package providers
+     */
+    protected function getPackageProviders($app): array
+    {
+        return [LokiServiceProvider::class];
+    }
+
+    /**
+     * Configure environment for testing
+     */
+    protected function getEnvironmentSetUp($app): void
+    {
+        $app['config']->set('cache.default', 'array');
+        $app['config']->set('queue.default', 'sync');
+        $app['config']->set('loki.url', 'http://localhost:3100');
+        $app['config']->set('loki.queue', 'sync');
+        $app['config']->set('loki.debug', false);
     }
 
     private function invokePrivateMethod($object, $methodName, array $parameters = [])
