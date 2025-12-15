@@ -359,7 +359,7 @@ The CI workflow:
 - Tests against all supported PHP and Laravel version combinations
 - Installs dependencies and runs the full PHPUnit test suite
 - Caches dependencies for faster builds
-- Runs automatically on every pull request and push to main branches
+- Runs automatically on every pull request and push to main, master, or develop branches
 
 You can view the workflow configuration in `.github/workflows/tests.yml`.
 
