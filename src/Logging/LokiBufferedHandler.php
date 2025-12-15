@@ -32,6 +32,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private float $memoryFlushInterval;
     private float $memoryBufferLastFlush;
 
+    // Buffer flusher instance
+    private ?BufferFlusher $bufferFlusher = null;
+
     // Static registry for shutdown handlers
     private static bool $shutdownRegistered = false;
     private static array $handlerInstances = [];
@@ -434,16 +437,25 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
+     * Get or create buffer flusher instance
+     */
+    private function getBufferFlusher(): BufferFlusher
+    {
+        if ($this->bufferFlusher === null) {
+            $this->bufferFlusher = new BufferFlusher($this->url, $this->username, $this->password);
+        }
+        
+        return $this->bufferFlusher;
+    }
+
+    /**
      * Flush buffered logs to the job queue
      * Public method to allow manual flushing
      */
     public function flush(): void
     {
-        // Create buffer flusher instance
-        $flusher = new BufferFlusher($this->url, $this->username, $this->password);
-        
-        // Flush buffer
-        $flusher->flush();
+        // Get buffer flusher instance and flush buffer
+        $this->getBufferFlusher()->flush();
     }
 
     /**
