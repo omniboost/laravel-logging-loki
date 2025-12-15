@@ -72,8 +72,18 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->structuredMetadataPrefix = $structuredMetadataPrefix;
 
         // Initialize in-memory buffer settings
-        $this->memoryBufferSize = max(1, $memoryBufferSize);
-        $this->memoryFlushInterval = max(0.1, $memoryFlushInterval);
+        // Memory buffer size cannot be lower than 1 or higher than cache buffer size
+        $this->memoryBufferSize = min(
+            max(1, $memoryBufferSize),
+            $this->bufferSize
+        );
+
+        // Memory flush interval cannot be lower than 0.1s or higher than cache flush interval
+        $this->memoryFlushInterval = min(
+            max(0.1, $memoryFlushInterval),
+            $this->flushInterval
+        );
+
         $this->memoryBufferLastFlush = microtime(true);
 
         // Register this instance for shutdown handling
