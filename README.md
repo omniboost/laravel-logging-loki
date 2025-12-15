@@ -222,7 +222,7 @@ The `SendLogsToLoki` job is the core component that handles asynchronous log tra
 ```php
 // In SendLogsToLoki class
 public int $tries = 3;        // Retry up to 3 times on failure
-public int $backoff = 10;     // Wait 10 seconds between retries (fixed delay)
+public int $backoff = 10;     // Fixed 10-second delay between each retry attempt
 ```
 
 **Queue Selection:**
@@ -292,7 +292,7 @@ php artisan queue:work --verbose  # Shows jobs as they're processed
 
 # Or query the jobs table directly
 php artisan tinker
->>> DB::table('jobs')->count();
+>>> \DB::table('jobs')->count();
 
 # For Laravel Horizon users (Redis queue)
 php artisan horizon:list
