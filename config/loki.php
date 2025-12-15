@@ -33,16 +33,16 @@ return [
     |
     | Configure how logs are buffered before being sent to Loki.
     |
-    | memory_buffer_size: Number of log entries to buffer in memory before 
-    |                     flushing to cache (default: 10, reduces cache writes)
-    | memory_flush_interval: Maximum seconds to wait before flushing memory 
-    |                        buffer to cache (default: 1.0)
+    | memory_buffer_size: Number of log entries to buffer in memory before
+    |                     flushing to cache (default: 100, cannot be higher than Loki buffer size, reduces cache writes)
+    | memory_flush_interval: Maximum seconds to wait before flushing memory
+    |                        buffer to cache (default: 1.0, cannot be higher than Loki flush interval)
     | buffer_size: Number of log entries to buffer in cache before flushing
     |              to the job queue
     | flush_interval: Maximum seconds to wait before flushing cache buffer
     |
     */
-    'memory_buffer_size' => env('LOKI_MEMORY_BUFFER_SIZE', 10),
+    'memory_buffer_size' => env('LOKI_MEMORY_BUFFER_SIZE', 100),
     'memory_flush_interval' => env('LOKI_MEMORY_FLUSH_INTERVAL', 1.0),
     'buffer_size' => env('LOKI_BUFFER_SIZE', 100),
     'flush_interval' => env('LOKI_FLUSH_INTERVAL', 5.0),

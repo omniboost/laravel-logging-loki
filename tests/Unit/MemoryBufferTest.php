@@ -394,7 +394,7 @@ class MemoryBufferTest extends TestCase
         $memoryBufferSize = $this->getPrivateProperty($handler, 'memoryBufferSize');
         $memoryFlushInterval = $this->getPrivateProperty($handler, 'memoryFlushInterval');
 
-        $this->assertEquals(10, $memoryBufferSize, 'Default memory buffer size should be 10');
+        $this->assertEquals(100, $memoryBufferSize, 'Default memory buffer size should be 100');
         $this->assertEquals(1.0, $memoryFlushInterval, 'Default memory flush interval should be 1.0');
 
         fwrite(STDERR, "    ✓ Default configuration values applied correctly\n");

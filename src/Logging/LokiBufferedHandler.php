@@ -58,7 +58,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         ?string $password = null,
         string $structuredMetadataPrefix = '',
         bool $bubble = true,
-        int $memoryBufferSize = 10,
+        int $memoryBufferSize = 100,
         float $memoryFlushInterval = 1.0
     ) {
         parent::__construct($level, $bubble);
