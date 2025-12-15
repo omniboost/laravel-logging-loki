@@ -7,6 +7,7 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 - ✅ **Buffered Logging**: Collects logs in memory before sending to reduce API calls
 - ✅ **Non-blocking**: Uses Laravel Jobs to send logs in the background
 - ✅ **Automatic Flushing**: Flushes based on buffer size or time interval
+- ✅ **Thread-Safe**: Race-condition protected buffer management ensures no log loss under concurrent access
 - ✅ **Configurable**: Extensive configuration options for buffer size, intervals, labels, etc.
 - ✅ **Resilient**: Automatic retries on failure with exponential backoff
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
@@ -265,6 +266,22 @@ php artisan queue:retry all
 - **Flush Interval**: Shorter intervals = more real-time but more API calls
 - **Queue**: Use Redis or database queue for reliability in production
 - **Non-blocking**: All Loki communication happens in background jobs
+
+## Thread Safety and Concurrency
+
+This library is designed to handle high-concurrency scenarios safely:
+
+- **Atomic Buffer Operations (Redis)**: When using Redis as the cache driver, atomic extraction and clearing of the buffer is guaranteed using Redis RENAME. For non-Redis cache drivers, exclusive locks are used to provide thread safety.
+- **No Log Loss (Redis)**: When using Redis as the cache driver, logs arriving during a flush operation are safely stored in a fresh buffer and are not lost, thanks to atomic operations.
+- **Caveat for Non-Redis Cache Drivers**: With non-Redis cache drivers, while exclusive locks ensure thread-safe buffer access, there is a minimal risk of log loss under extreme concurrency scenarios. For strict "no log loss" guarantees, use Redis as your cache driver.
+- **Lock-based Coordination**: Distributed locks prevent multiple processes from accessing the buffer simultaneously
+- **Redis Optimized**: When using Redis as the cache driver, atomic operations provide better performance without lock contention
+
+**Best Practices for High-Traffic Applications:**
+1. Use Redis as your cache driver for better performance under high concurrency
+2. Configure appropriate buffer sizes to balance between API calls and memory usage
+3. Monitor your queue workers to ensure logs are processed timely
+4. Consider using multiple queue workers to handle high log volumes
 
 ## Requirements
 

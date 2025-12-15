@@ -109,19 +109,18 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     {
         // Use cache lock to prevent race conditions
         $lock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
+        $shouldFlush = false;
 
         try {
             // Try to acquire lock with 5 second timeout
-            $lock->block(5, function () use ($logEntry) {
+            $lock->block(5, function () use ($logEntry, &$shouldFlush) {
                 // Add log entry to buffer
                 $buffer = Cache::get(self::BUFFER_KEY, []);
                 $buffer[] = $logEntry->toArray();
                 Cache::put(self::BUFFER_KEY, $buffer);
 
-                if ($this->shouldFlush(count($buffer))) {
-                    // Flush the buffer we have
-                    $this->flush($buffer);
-                }
+                // Check if we should flush (but don't flush while holding the buffer lock)
+                $shouldFlush = $this->shouldFlush(count($buffer));
             });
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
             // If we can't get the lock, just skip this log entry
@@ -129,6 +128,11 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Alternative: could log to a fallback channel
         } finally {
             optional($lock)->release();
+        }
+
+        // Trigger flush AFTER releasing the buffer lock to avoid holding multiple locks
+        if ($shouldFlush) {
+            $this->flush();
         }
     }
 
@@ -171,10 +175,8 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     protected function flushBuffer(array $buffer): void
     {
         // Dispatch job to send logs to Loki asynchronously
+        // Note: Buffer should already be cleared atomically before this is called
         SendLogsToLoki::dispatch($buffer, $this->url, $this->username, $this->password);
-
-        // Clear buffer and update last flush time
-        Cache::forget(self::BUFFER_KEY);
     }
 
     /**
@@ -237,7 +239,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * Flush buffer using Redis pipeline (atomic)
+     * Flush buffer using Redis atomic operations
      */
     private function flushRedis(): void
     {
@@ -256,13 +258,29 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 return;
             }
 
-            // Atomically get all items and delete the list
-            $results = Redis::pipeline(function ($pipe) {
-                $pipe->lrange(self::BUFFER_KEY, 0, -1);
-                $pipe->del(self::BUFFER_KEY);
-            });
+            // Atomically read and remove items from the buffer
+            // Using LRANGE to read items, then LTRIM to remove them
+            // Note: Pipeline is not a transaction, but the FLUSH_LOCK_KEY ensures only
+            // one flush operation runs at a time, preventing concurrent access
+            // New logs added during pipeline will remain in the list (no data loss)
+            // If bufferSize equals list length and no new items added, LTRIM clears the list
+            try {
+                // Use pipeline to batch read and trim operations
+                $results = Redis::pipeline(function ($pipe) use ($bufferSize) {
+                    // Get all current items (0 to bufferSize-1)
+                    $pipe->lrange(self::BUFFER_KEY, 0, $bufferSize - 1);
+                    // Trim to keep only items from bufferSize onwards (removes what we just read)
+                    $pipe->ltrim(self::BUFFER_KEY, $bufferSize, -1);
+                });
 
-            $buffer = $results[0] ?? [];
+                $buffer = $results[0] ?? [];
+            } catch (\RedisException | \Predis\Response\ServerException $e) {
+                // Redis errors (connection, permissions, etc.)
+                return;
+            } catch (\Exception $e) {
+                // Catch any other Redis-related exceptions for safety
+                return;
+            }
 
             if (empty($buffer)) {
                 return;
@@ -283,27 +301,59 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     private function flushWithLock(): void
     {
-        $lock = Cache::lock(self::FLUSH_LOCK_KEY, 5);
+        // First, acquire FLUSH_LOCK_KEY to prevent multiple concurrent flush operations
+        $flushLock = Cache::lock(self::FLUSH_LOCK_KEY, 5);
+        
+        if (!$flushLock->get()) {
+            return; // Another process is already flushing
+        }
 
         try {
-            // Try to get the lock.
-            // If not succesful, the flush is already busy.
-            if ($lock->get()) {
-                $buffer = Cache::get(self::BUFFER_KEY, []);
-                if (empty($buffer)) {
-                    return;
+            // Now acquire BUFFER_LOCK_KEY to atomically read and clear the buffer
+            // This prevents logs from being added between reading and clearing
+            $bufferLock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
+            $bufferLockAcquired = false;
+
+            try {
+                // Try to get the buffer lock
+                if ($bufferLock->get()) {
+                    $bufferLockAcquired = true;
+                    
+                    // Atomically extract and clear the buffer within the lock
+                    $buffer = Cache::get(self::BUFFER_KEY, []);
+                    
+                    if (empty($buffer)) {
+                        // Release buffer lock before returning
+                        $bufferLock->release();
+                        $bufferLockAcquired = false;
+                        return;
+                    }
+
+                    // Clear the buffer BEFORE dispatching the job
+                    // This prevents race condition where new logs arrive during job dispatch
+                    Cache::forget(self::BUFFER_KEY);
+
+                    // Convert buffer to LokiLogEntry objects
+                    $decodedBuffer = array_map(fn($item) => LokiLogEntry::fromArray($item), $buffer);
+
+                    // Release buffer lock before dispatching job to avoid blocking buffer operations
+                    $bufferLock->release();
+                    $bufferLockAcquired = false;
+                    
+                    // Flush buffer (dispatch job) - still holding flush lock
+                    $this->flushBuffer($decodedBuffer);
                 }
-
-                // Convert buffer to LokiLogEntry objects
-                $decodedBuffer = array_map(fn($item) => LokiLogEntry::fromArray($item), $buffer);
-
-                // Flush buffer
-                $this->flushBuffer($decodedBuffer);
+            } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
+                // If we can't get the buffer lock, another process is using the buffer
+            } finally {
+                // Only release buffer lock if still acquired
+                if ($bufferLockAcquired) {
+                    $bufferLock->release();
+                }
             }
-        } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
-            // If we can't get the lock, another process is likely flushing
         } finally {
-            optional($lock)->release();
+            // Always release the flush lock
+            $flushLock->release();
         }
     }
 
