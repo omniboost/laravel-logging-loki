@@ -221,7 +221,7 @@ class LokiBufferedHandler
             // This can happen during:
             // 1. PHPUnit test teardown when testing non-Laravel components
             // 2. Application shutdown after Laravel container is destroyed
-            // We silently skip this since the error is already logged by flushMemoryBuffer()
+            // Note: If called from flushMemoryBuffer(), the error is already logged there
             return;
         }
     }
