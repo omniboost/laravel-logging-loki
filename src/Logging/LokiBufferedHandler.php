@@ -266,10 +266,13 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Redis throws an exception if source key doesn't exist
             try {
                 Redis::rename(self::BUFFER_KEY, $tempKey);
-            } catch (\RedisException $e) {
+            } catch (\RedisException | \Predis\Response\ServerException | \Redis\Exception $e) {
                 // Key doesn't exist - another process already flushed it
                 // Or other Redis errors (connection, permissions, etc.)
                 // Either way, we can't flush, so return
+                return;
+            } catch (\Exception $e) {
+                // Catch any other Redis-related exceptions for safety
                 return;
             }
 
@@ -298,11 +301,13 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     private function flushWithLock(): void
     {
-        $lock = Cache::lock(self::FLUSH_LOCK_KEY, 5);
+        // Use BUFFER_LOCK_KEY to ensure atomicity with bufferLogWithLock()
+        // This prevents logs from being added between reading and clearing the buffer
+        $lock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
 
         try {
             // Try to get the lock.
-            // If not successful, the flush is already busy.
+            // If not successful, another process is using the buffer.
             if ($lock->get()) {
                 // Atomically extract and clear the buffer within the lock
                 $buffer = Cache::get(self::BUFFER_KEY, []);
@@ -318,11 +323,14 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 // Convert buffer to LokiLogEntry objects
                 $decodedBuffer = array_map(fn($item) => LokiLogEntry::fromArray($item), $buffer);
 
+                // Release lock before dispatching job to avoid blocking buffer operations
+                $lock->release();
+                
                 // Flush buffer (dispatch job)
                 $this->flushBuffer($decodedBuffer);
             }
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
-            // If we can't get the lock, another process is likely flushing
+            // If we can't get the lock, another process is using the buffer
         } finally {
             optional($lock)->release();
         }

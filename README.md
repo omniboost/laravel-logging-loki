@@ -271,11 +271,11 @@ php artisan queue:retry all
 
 This library is designed to handle high-concurrency scenarios safely:
 
-- **Atomic Buffer Operations**: Uses Redis RENAME or cache locks to atomically extract and clear the buffer during flush, preventing race conditions
-- **No Log Loss**: Logs arriving during a flush operation are safely stored in a fresh buffer, not lost
-- **Lock-based Coordination**: Distributed locks prevent multiple processes from flushing simultaneously
+- **Atomic Buffer Operations (Redis)**: When using Redis as the cache driver, atomic extraction and clearing of the buffer is guaranteed using Redis RENAME. For non-Redis cache drivers, exclusive locks are used to provide thread safety.
+- **No Log Loss (Redis)**: When using Redis as the cache driver, logs arriving during a flush operation are safely stored in a fresh buffer and are not lost, thanks to atomic operations.
+- **Caveat for Non-Redis Cache Drivers**: With non-Redis cache drivers, while exclusive locks ensure thread-safe buffer access, there is a minimal risk of log loss under extreme concurrency scenarios. For strict "no log loss" guarantees, use Redis as your cache driver.
+- **Lock-based Coordination**: Distributed locks prevent multiple processes from accessing the buffer simultaneously
 - **Redis Optimized**: When using Redis as the cache driver, atomic operations provide better performance without lock contention
-- **Fallback Safety**: For non-Redis cache drivers, exclusive locks ensure thread-safe buffer access
 
 **Best Practices for High-Traffic Applications:**
 1. Use Redis as your cache driver for better performance under high concurrency
