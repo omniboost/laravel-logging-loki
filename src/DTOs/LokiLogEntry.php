@@ -13,19 +13,19 @@ class LokiLogEntry
      * @param array<string, string> $stream Key-value pairs of labels (e.g., ['level' => 'info', 'channel' => 'application'])
      * @param string $entry The actual log message/content
      * @param string $timestamp Unix timestamp in nanoseconds (string to prevent precision loss)
-     * @param array<string, mixed> $extras Additional metadata/context to include in the log entry
+     * @param array<string, mixed> $structuredMetadata Additional structured metadata to include in the log entry
      */
     public function __construct(
         public array $stream,
         public string $entry,
         public string $timestamp,
-        public array $extras = []
+        public array $structuredMetadata = []
     ) {}
 
     /**
      * Convert to array format
      *
-     * @return array{stream: array<string, string>, entry: string, timestamp: string, extras: array<string, mixed>}
+     * @return array{stream: array<string, string>, entry: string, timestamp: string, structuredMetadata: array<string, mixed>}
      */
     public function toArray(): array
     {
@@ -33,14 +33,14 @@ class LokiLogEntry
             'stream' => $this->stream,
             'entry' => $this->entry,
             'timestamp' => $this->timestamp,
-            'extras' => $this->extras
+            'structuredMetadata' => $this->structuredMetadata
         ];
     }
 
     /**
      * Create from array
      *
-     * @param array{stream: array<string, string>, entry: string, timestamp: string, extras?: array<string, mixed>} $data
+     * @param array{stream: array<string, string>, entry: string, timestamp: string, structuredMetadata?: array<string, mixed>} $data
      */
     public static function fromArray(array $data): self
     {
@@ -48,7 +48,7 @@ class LokiLogEntry
             $data['stream'] ?? [],
             $data['entry'] ?? '',
             $data['timestamp'] ?? (string)(time() * 1000000000),
-            $data['extras'] ?? []
+            $data['structuredMetadata'] ?? []
         );
     }
 

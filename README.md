@@ -38,7 +38,7 @@ LOKI_FLUSH_INTERVAL=5.0
 LOKI_QUEUE=default
 LOKI_LOG_LEVEL=debug
 LOKI_DEBUG=false
-LOKI_EXTRA_PREFIX=
+LOKI_STRUCTURED_METADATA_PREFIX=
 ```
 
 ## Configuration
@@ -59,7 +59,7 @@ Add the Loki channel to your `config/logging.php`:
         'flush_interval' => env('LOKI_FLUSH_INTERVAL', 5.0),
         'username' => env('LOKI_USERNAME'),
         'password' => env('LOKI_PASSWORD'),
-        'extra_prefix' => env('LOKI_EXTRA_PREFIX', ''),
+        'structured_metadata_prefix' => env('LOKI_STRUCTURED_METADATA_PREFIX', ''),
         'labels' => [
             'app' => env('APP_NAME', 'laravel'),
             'env' => env('APP_ENV', 'production'),
@@ -119,13 +119,13 @@ Log::info('API request completed', [
 ]);
 ```
 
-### Adding Extra Metadata
+### Adding Structured Metadata
 
-You can include additional context data as "extras" in your logs. The `extra_prefix` configuration controls how extras are extracted from the log context:
+You can include additional context data as structured metadata in your logs. The `structured_metadata_prefix` configuration controls how structured metadata is extracted from the log context:
 
-#### Include All Context as Extras (Default)
+#### Include All Context as Structured Metadata (Default)
 
-When `extra_prefix` is empty (default), all context data (except `labels`) is added as extras:
+When `structured_metadata_prefix` is empty (default), all context data (except `labels`) is added as structured metadata:
 
 ```php
 Log::info('User action', [
@@ -133,32 +133,32 @@ Log::info('User action', [
     'action' => 'login',
     'ip_address' => '192.168.1.1',
 ]);
-// All three fields (user_id, action, ip_address) will be included as extras
+// All three fields (user_id, action, ip_address) will be included as structured metadata
 ```
 
-#### Selective Extras with Prefix
+#### Selective Structured Metadata with Prefix
 
-Set a prefix to only include specific context fields as extras:
+Set a prefix to only include specific context fields as structured metadata:
 
 ```php
 // In .env or config
-LOKI_EXTRA_PREFIX=extra_
+LOKI_STRUCTURED_METADATA_PREFIX=meta_
 
 // In your code
 Log::info('Payment processed', [
-    'extra_user_id' => 456,
-    'extra_order_id' => 789,
-    'extra_amount' => 99.99,
+    'meta_user_id' => 456,
+    'meta_order_id' => 789,
+    'meta_amount' => 99.99,
     'internal_flag' => true,  // Not included (no prefix)
 ]);
-// Only user_id, order_id, and amount will be included as extras (prefix removed)
+// Only user_id, order_id, and amount will be included as structured metadata (prefix removed)
 ```
 
 **Common Use Cases:**
-- User identifiers: `extra_user_id`, `extra_username`
-- Request tracking: `extra_request_id`, `extra_session_id`
-- Business context: `extra_order_id`, `extra_transaction_id`
-- Performance metrics: `extra_duration_ms`, `extra_memory_mb`
+- User identifiers: `meta_user_id`, `meta_username`
+- Request tracking: `meta_request_id`, `meta_session_id`
+- Business context: `meta_order_id`, `meta_transaction_id`
+- Performance metrics: `meta_duration_ms`, `meta_memory_mb`
 
 ### Channel-specific Logging
 
@@ -198,7 +198,7 @@ Log::stack(['loki', 'slack'])->critical('Critical error occurred!');
 | `level` | Minimum log level | `debug` |
 | `debug` | Enable debug logging | `false` |
 | `labels` | Default labels for all logs | `['app', 'env', 'server']` |
-| `extra_prefix` | Prefix for extracting extras from context | `''` (empty = all context) |
+| `structured_metadata_prefix` | Prefix for extracting structured metadata from context | `''` (empty = all context) |
 
 ## Queue Configuration
 

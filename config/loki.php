@@ -90,17 +90,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Extra Metadata Prefix
+    | Structured Metadata Prefix
     |--------------------------------------------------------------------------
     |
-    | Configure a prefix for extracting extra metadata from log context.
-    | If left empty (default), all context data is added as extras.
+    | Configure a prefix for extracting structured metadata from log context.
+    | If left empty (default), all context data is added as structured metadata.
     | If set, only context fields starting with this prefix will be extracted
-    | and included as extras in the Loki payload.
+    | and included as structured metadata in the Loki payload.
     |
-    | Example: Setting 'extra_' means context fields like 'extra_user_id'
-    | and 'extra_request_id' will be included as extras, while others won't.
+    | Example: Setting 'meta_' means context fields like 'meta_user_id'
+    | and 'meta_request_id' will be included as structured metadata, while others won't.
     |
     */
-    'extra_prefix' => env('LOKI_EXTRA_PREFIX', ''),
+    'structured_metadata_prefix' => env('LOKI_STRUCTURED_METADATA_PREFIX', ''),
 ];

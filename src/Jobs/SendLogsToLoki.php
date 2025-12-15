@@ -136,24 +136,17 @@ class SendLogsToLoki implements ShouldQueue
                 $streamsById->{$streamId} = $stream;
             }
 
-            // Build the log entry with extras if present
-            $entry = $logEntry->entry;
-            if (!empty($logEntry->extras)) {
-                // Append extras as JSON to the log entry
-                // Use JSON_PARTIAL_OUTPUT_ON_ERROR to prevent job failures from non-serializable data
-                $extrasJson = json_encode($logEntry->extras, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_SLASHES);
-                if ($extrasJson !== false) {
-                    $entry .= ' ' . $extrasJson;
-                }
+            // Build the log entry value array for Loki
+            // Format: [timestamp, line, structuredMetadata (optional)]
+            $value = [$logEntry->timestamp, $logEntry->entry];
+            
+            // Add structured metadata as third element if present
+            if (!empty($logEntry->structuredMetadata)) {
+                $value[] = $logEntry->structuredMetadata;
             }
 
             // Add values to the existing stream
-            $streamsById->{$streamId}->add([
-                [
-                    $logEntry->timestamp,
-                    $entry
-                ]
-            ]);
+            $streamsById->{$streamId}->add([$value]);
         }
 
         // Convert streams object to array and return it

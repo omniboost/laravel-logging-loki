@@ -23,7 +23,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private ?string $username;
     private ?string $password;
     private array $defaultLabels;
-    private string $extraPrefix;
+    private string $structuredMetadataPrefix;
 
     /**
      * @param string $url Loki URL
@@ -33,7 +33,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      * @param array $defaultLabels Default labels to apply to all logs
      * @param string|null $username Optional basic auth username
      * @param string|null $password Optional basic auth password
-     * @param string $extraPrefix Prefix for extracting extra metadata from context
+     * @param string $structuredMetadataPrefix Prefix for extracting structured metadata from context
      * @param bool $bubble Whether to bubble the record to the next handler
      */
     public function __construct(
@@ -44,7 +44,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         array $defaultLabels = [],
         ?string $username = null,
         ?string $password = null,
-        string $extraPrefix = '',
+        string $structuredMetadataPrefix = '',
         bool $bubble = true
     ) {
         parent::__construct($level, $bubble);
@@ -55,7 +55,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->username = $username;
         $this->password = $password;
         $this->defaultLabels = $defaultLabels;
-        $this->extraPrefix = $extraPrefix;
+        $this->structuredMetadataPrefix = $structuredMetadataPrefix;
     }
 
     /**
@@ -194,8 +194,8 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     private function prepareLogEntry(LogRecord $record): LokiLogEntry
     {
-        // Extract extras from context based on prefix configuration
-        $extras = $this->extractExtras($record->context);
+        // Extract structured metadata from context based on prefix configuration
+        $structuredMetadata = $this->extractStructuredMetadata($record->context);
 
         $logEntry = new LokiLogEntry(
             // Labels will be set later
@@ -207,8 +207,8 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Timestamp in nanoseconds
             (string)($record->datetime->getTimestamp() * 1000000000),
 
-            // Extras
-            $extras
+            // Structured metadata
+            $structuredMetadata
         );
 
         // Combine default labels with standard labels
@@ -226,47 +226,47 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * Extract extras from context based on prefix configuration
+     * Extract structured metadata from context based on prefix configuration
      *
      * @param array $context Log context array
      * @return array<string, mixed>
      */
-    private function extractExtras(array $context): array
+    private function extractStructuredMetadata(array $context): array
     {
         // If context is empty, return empty array
         if (empty($context)) {
             return [];
         }
 
-        // Remove 'labels' key from extras as it's handled separately
+        // Remove 'labels' key from structured metadata as it's handled separately
         $contextWithoutLabels = array_filter(
             $context,
             fn($key) => $key !== 'labels',
             ARRAY_FILTER_USE_KEY
         );
 
-        // If no prefix is configured, include all context as extras
-        if (empty($this->extraPrefix)) {
+        // If no prefix is configured, include all context as structured metadata
+        if (empty($this->structuredMetadataPrefix)) {
             return $contextWithoutLabels;
         }
 
         // Extract only fields that start with the prefix
-        $extras = [];
-        $prefixLength = strlen($this->extraPrefix);
+        $structuredMetadata = [];
+        $prefixLength = strlen($this->structuredMetadataPrefix);
 
         foreach ($contextWithoutLabels as $key => $value) {
-            if (str_starts_with($key, $this->extraPrefix)) {
+            if (str_starts_with($key, $this->structuredMetadataPrefix)) {
                 // Remove the prefix from the key
                 $cleanKey = substr($key, $prefixLength);
                 
                 // Skip if the clean key is empty (key was exactly the prefix)
                 if ($cleanKey !== '') {
-                    $extras[$cleanKey] = $value;
+                    $structuredMetadata[$cleanKey] = $value;
                 }
             }
         }
 
-        return $extras;
+        return $structuredMetadata;
     }
 
     /**
