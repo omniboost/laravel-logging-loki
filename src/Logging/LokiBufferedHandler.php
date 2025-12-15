@@ -304,11 +304,14 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         // Use BUFFER_LOCK_KEY to ensure atomicity with bufferLogWithLock()
         // This prevents logs from being added between reading and clearing the buffer
         $lock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
+        $lockAcquired = false;
 
         try {
             // Try to get the lock.
             // If not successful, another process is using the buffer.
             if ($lock->get()) {
+                $lockAcquired = true;
+                
                 // Atomically extract and clear the buffer within the lock
                 $buffer = Cache::get(self::BUFFER_KEY, []);
                 
@@ -325,6 +328,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
 
                 // Release lock before dispatching job to avoid blocking buffer operations
                 $lock->release();
+                $lockAcquired = false;
                 
                 // Flush buffer (dispatch job)
                 $this->flushBuffer($decodedBuffer);
@@ -332,7 +336,10 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
             // If we can't get the lock, another process is using the buffer
         } finally {
-            optional($lock)->release();
+            // Only release if still acquired
+            if ($lockAcquired) {
+                optional($lock)->release();
+            }
         }
     }
 
