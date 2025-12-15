@@ -91,6 +91,11 @@ class LokiFlushCommand extends Command
     // Get all channels
     $channels = config('logging.channels', []);
 
+    // Handle null or non-array config
+    if (!is_array($channels)) {
+      return $loggers;
+    }
+
     // Loop through all channels and find those using the LokiBufferedLogger
     foreach ($channels as $channelName => $channelConfig) {
       // Ensure 'driver' is set
@@ -125,6 +130,16 @@ class LokiFlushCommand extends Command
 
     // Loop through loggers
     foreach ($loggers as $channelName => $logger) {
+      // Skip null or invalid loggers
+      if ($logger === null || !is_object($logger)) {
+        continue;
+      }
+
+      // Check if logger has getHandlers method
+      if (!method_exists($logger, 'getHandlers')) {
+        continue;
+      }
+
       // Get the logger handlers
       $loggerHandlers = $logger->getHandlers();
 
