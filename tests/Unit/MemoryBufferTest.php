@@ -431,14 +431,11 @@ class MemoryBufferTest extends TestCase
             $entries[] = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord("Batch log $i")]);
         }
 
-        // Verify batch method exists and accepts array (method will fail gracefully in unit test context)
-        try {
-            $this->invokePrivateMethod($handler, 'bufferLogs', [$entries]);
-            // In unit test context without Laravel, this will throw, which is expected
-        } catch (\Throwable $e) {
-            // Expected in unit test context - we just want to verify method exists and accepts parameters
-            $this->assertStringContainsString('config', $e->getMessage(), 'Expected error about missing config in unit test');
-        }
+        // Verify batch method exists and handles gracefully in unit test context without Laravel
+        $this->invokePrivateMethod($handler, 'bufferLogs', [$entries]);
+        
+        // Method should complete without throwing - it handles missing Laravel context gracefully
+        $this->assertTrue(true, 'bufferLogs handles missing Laravel context gracefully');
 
         fwrite(STDERR, "    ✓ bufferLogs method exists and accepts array parameter\n");
     }

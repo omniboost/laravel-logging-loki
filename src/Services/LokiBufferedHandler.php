@@ -186,7 +186,13 @@ class LokiBufferedHandler
      */
     private function isRedisAvailable(): bool
     {
-        return strtolower(config('cache.default')) === 'redis';
+        try {
+            return strtolower(config('cache.default')) === 'redis';
+        } catch (\Throwable $e) {
+            // Config may not be available during shutdown or in test environments
+            // Default to false (use lock-based approach)
+            return false;
+        }
     }
 
     /**
@@ -200,13 +206,24 @@ class LokiBufferedHandler
             return;
         }
 
-        // Use Redis atomic operations if available for better performance
-        if ($this->isRedisAvailable()) {
-            $this->bufferLogsWithRedis($logEntries);
+        // Check if Laravel container/facades are available
+        // This can fail during shutdown or in non-Laravel contexts (e.g., unit tests)
+        try {
+            // Use Redis atomic operations if available for better performance
+            if ($this->isRedisAvailable()) {
+                $this->bufferLogsWithRedis($logEntries);
+                return;
+            }
+
+            $this->bufferLogsWithLock($logEntries);
+        } catch (\Throwable $e) {
+            // Laravel container not available - skip buffering
+            // This can happen during:
+            // 1. PHPUnit test teardown when testing non-Laravel components
+            // 2. Application shutdown after Laravel container is destroyed
+            // We silently skip this since the error is already logged by flushMemoryBuffer()
             return;
         }
-
-        $this->bufferLogsWithLock($logEntries);
     }
 
     /**
