@@ -263,6 +263,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Note: Pipeline is not a transaction, but the FLUSH_LOCK_KEY ensures only
             // one flush operation runs at a time, preventing concurrent access
             // New logs added during pipeline will remain in the list (no data loss)
+            // If bufferSize equals list length and no new items added, LTRIM clears the list
             try {
                 // Use pipeline to batch read and trim operations
                 $results = Redis::pipeline(function ($pipe) use ($bufferSize) {
