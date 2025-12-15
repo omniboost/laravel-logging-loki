@@ -92,6 +92,10 @@ class LokiFlushCommand extends Command
     $channels = config('logging.channels', []);
 
     // Handle null or non-array config
+    // This can occur when:
+    // - Config file is missing or corrupted
+    // - Environment is not properly initialized
+    // - Config cache is invalid
     if (!is_array($channels)) {
       return $loggers;
     }

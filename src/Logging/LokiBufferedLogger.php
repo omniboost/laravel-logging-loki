@@ -73,7 +73,7 @@ class LokiBufferedLogger extends AbstractProcessingHandler
     /**
      * Get the command name for flushing this logger
      *
-     * @deprecated This method is not used and may be removed in future versions
+     * @deprecated since version 1.1, will be removed in version 2.0. This method is not used and serves no purpose.
      * @return string The command name
      */
     public function getCommand(): string
