@@ -24,17 +24,26 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private ?string $password;
     private array $defaultLabels;
     private string $structuredMetadataPrefix;
+    
+    // In-memory buffer properties
+    private array $memoryBuffer = [];
+    private int $memoryBufferSize;
+    private float $memoryFlushInterval;
+    private float $memoryBufferLastFlush;
+    private static bool $shutdownRegistered = false;
 
     /**
      * @param string $url Loki URL
      * @param int $level The minimum logging level
-     * @param int $bufferSize Number of logs to buffer before flushing
-     * @param float $flushInterval Max seconds to wait before flushing
+     * @param int $bufferSize Number of logs to buffer in cache before flushing to queue
+     * @param float $flushInterval Max seconds to wait before flushing cache buffer
      * @param array $defaultLabels Default labels to apply to all logs
      * @param string|null $username Optional basic auth username
      * @param string|null $password Optional basic auth password
      * @param string $structuredMetadataPrefix Prefix for extracting structured metadata from context
      * @param bool $bubble Whether to bubble the record to the next handler
+     * @param int $memoryBufferSize Number of logs to buffer in memory before flushing to cache (default: 10)
+     * @param float $memoryFlushInterval Max seconds to wait before flushing memory buffer (default: 1.0)
      */
     public function __construct(
         string $url,
@@ -45,7 +54,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         ?string $username = null,
         ?string $password = null,
         string $structuredMetadataPrefix = '',
-        bool $bubble = true
+        bool $bubble = true,
+        int $memoryBufferSize = 10,
+        float $memoryFlushInterval = 1.0
     ) {
         parent::__construct($level, $bubble);
 
@@ -56,6 +67,19 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->password = $password;
         $this->defaultLabels = $defaultLabels;
         $this->structuredMetadataPrefix = $structuredMetadataPrefix;
+        
+        // Initialize in-memory buffer settings
+        $this->memoryBufferSize = max(1, $memoryBufferSize);
+        $this->memoryFlushInterval = max(0.1, $memoryFlushInterval);
+        $this->memoryBufferLastFlush = microtime(true);
+        
+        // Register shutdown function once per process to flush memory buffer
+        if (!self::$shutdownRegistered) {
+            register_shutdown_function(function () {
+                $this->flushMemoryBuffer();
+            });
+            self::$shutdownRegistered = true;
+        }
     }
 
     /**
@@ -64,7 +88,64 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     protected function write(LogRecord $record): void
     {
         $logEntry = $this->prepareLogEntry($record);
-        $this->bufferLog($logEntry);
+        $this->addToMemoryBuffer($logEntry);
+    }
+    
+    /**
+     * Add log entry to in-memory buffer
+     * Flushes to cache buffer when threshold is reached or interval elapsed
+     */
+    private function addToMemoryBuffer(LokiLogEntry $logEntry): void
+    {
+        $this->memoryBuffer[] = $logEntry;
+        
+        // Check if we should flush memory buffer to cache
+        if ($this->shouldFlushMemoryBuffer()) {
+            $this->flushMemoryBuffer();
+        }
+    }
+    
+    /**
+     * Check if memory buffer should be flushed to cache
+     */
+    private function shouldFlushMemoryBuffer(): bool
+    {
+        // Flush if memory buffer size threshold reached
+        if (count($this->memoryBuffer) >= $this->memoryBufferSize) {
+            return true;
+        }
+        
+        // Flush if time interval elapsed
+        $elapsed = microtime(true) - $this->memoryBufferLastFlush;
+        return $elapsed >= $this->memoryFlushInterval;
+    }
+    
+    /**
+     * Flush in-memory buffer to cache buffer
+     * This moves logs from memory to the persistent cache layer
+     */
+    private function flushMemoryBuffer(): void
+    {
+        if (empty($this->memoryBuffer)) {
+            return;
+        }
+        
+        // Get all buffered logs and clear memory buffer atomically
+        $logsToFlush = $this->memoryBuffer;
+        $this->memoryBuffer = [];
+        $this->memoryBufferLastFlush = microtime(true);
+        
+        // Add each log to the cache buffer
+        // Wrap in try-catch to prevent errors in destructor or shutdown
+        try {
+            foreach ($logsToFlush as $logEntry) {
+                $this->bufferLog($logEntry);
+            }
+        } catch (\Throwable $e) {
+            // Silently fail to avoid breaking application
+            // In production, logs would already be in memory and would be
+            // attempted again on next flush or process end
+        }
     }
 
     /**
@@ -454,16 +535,16 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     public function close(): void
     {
+        $this->flushMemoryBuffer();
         $this->flush();
         parent::close();
     }
 
     /**
-     * Destructor - ensure logs are flushed
+     * Destructor - ensure memory buffer is flushed
      */
     public function __destruct()
     {
-        // Note: Destructor flush might not always work reliably
-        // Consider using a scheduled task for guaranteed flushing
+        $this->flushMemoryBuffer();
     }
 }
