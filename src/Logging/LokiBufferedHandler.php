@@ -266,7 +266,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Redis throws an exception if source key doesn't exist
             try {
                 Redis::rename(self::BUFFER_KEY, $tempKey);
-            } catch (\RedisException | \Predis\Response\ServerException | \Redis\Exception $e) {
+            } catch (\RedisException | \Predis\Response\ServerException $e) {
                 // Key doesn't exist - another process already flushed it
                 // Or other Redis errors (connection, permissions, etc.)
                 // Either way, we can't flush, so return
@@ -311,7 +311,6 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // If not successful, another process is using the buffer.
             if ($lock->get()) {
                 $lockAcquired = true;
-                
                 // Atomically extract and clear the buffer within the lock
                 $buffer = Cache::get(self::BUFFER_KEY, []);
                 
