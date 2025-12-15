@@ -207,6 +207,34 @@ This library uses a two-tier buffering system for optimal performance:
 
 5. **Retries**: If sending fails, the job retries up to 3 times with exponential backoff
 
+### The SendLogsToLoki Job
+
+The `SendLogsToLoki` job is the core component that handles asynchronous log transmission to Grafana Loki. When the cache buffer reaches its threshold or flush interval, logs are dispatched to this Laravel queue job for background processing.
+
+**Key Features:**
+- **Implements `ShouldQueue`**: Runs asynchronously in the background via Laravel's queue system
+- **Automatic Retries**: Configures 3 retry attempts with a 10-second exponential backoff between retries
+- **Batch Processing**: Groups multiple log entries by labels into Loki streams for efficient transmission
+- **Structured Metadata Support**: Automatically includes structured metadata (if present) as the third element in Loki's values array
+- **Error Handling**: Logs failures to your default Laravel log channel when debug mode is enabled
+
+**Job Configuration:**
+```php
+public int $tries = 3;        // Retry up to 3 times on failure
+public int $backoff = 10;     // Wait 10 seconds between retries (exponential)
+```
+
+**Queue Selection:**
+The job uses the queue specified in your `config/loki.php` configuration:
+```php
+$this->onQueue(config('loki.queue', 'default'));
+```
+
+**Stream Preparation:**
+The job intelligently groups logs with identical labels into a single Loki stream, reducing the number of API calls and improving efficiency. Each log entry is formatted according to Loki's Push API format:
+- Without structured metadata: `[timestamp, message]`
+- With structured metadata: `[timestamp, message, structuredMetadata]`
+
 ### Benefits of Dual-Layer Buffering
 
 - **Better Performance**: Reduces cache write operations by batching logs in memory first
@@ -251,6 +279,51 @@ numprocs=1
 redirect_stderr=true
 stdout_logfile=/path/to/worker.log
 ```
+
+### Monitoring Queue Jobs
+
+Monitor the `SendLogsToLoki` jobs in your queue to ensure logs are being processed:
+
+**View all queued jobs:**
+```bash
+# For database queue driver
+php artisan queue:monitor
+
+# Or use Laravel Horizon (if installed)
+php artisan horizon:list
+```
+
+**Check failed jobs:**
+```bash
+php artisan queue:failed
+```
+
+**Retry failed jobs:**
+```bash
+# Retry all failed jobs
+php artisan queue:retry all
+
+# Retry a specific job by ID
+php artisan queue:retry 5
+```
+
+**View job statistics:**
+```bash
+# For Laravel Horizon users
+php artisan horizon:stats
+```
+
+**Debug job execution:**
+Enable debug mode in your `.env` to see detailed logs about job execution:
+```env
+LOKI_DEBUG=true
+```
+
+When debug mode is enabled, the `SendLogsToLoki` job logs:
+- The number of streams being sent
+- The total number of log entries
+- The Loki URL being used
+- Any errors or failures during transmission
 
 ## Viewing Logs in Grafana
 
@@ -298,51 +371,156 @@ LOKI_FLUSH_INTERVAL=3.0
 
 ### Job failures
 
-Check failed jobs:
+The `SendLogsToLoki` job may fail for several reasons. Here's how to diagnose and resolve them:
+
+**Common failure reasons:**
+1. **Loki server is unreachable** - Network issues or incorrect URL
+2. **Authentication failure** - Wrong username/password
+3. **Invalid log format** - Malformed log entries
+4. **Loki API errors** - Server-side errors (500, 503, etc.)
+
+**Check failed jobs:**
 
 ```bash
 php artisan queue:failed
 ```
 
-Retry failed jobs:
+**View detailed failure information:**
+Enable debug mode to get detailed error logs:
+```env
+LOKI_DEBUG=true
+```
+
+The job's `failed()` method logs comprehensive error information including:
+- Error message and stack trace
+- Number of streams being sent
+- Total number of log entries
+- Loki URL
+
+**Retry failed jobs:**
 
 ```bash
+# Retry all failed jobs
 php artisan queue:retry all
+
+# Retry a specific job by ID
+php artisan queue:retry 5
+
+# Flush all failed jobs (delete them)
+php artisan queue:flush
 ```
+
+**Prevent job failures:**
+1. Ensure Loki server is running and accessible
+2. Verify authentication credentials are correct
+3. Use appropriate buffer sizes to avoid overwhelming Loki
+4. Monitor your queue worker's health with Supervisor or similar tools
+5. Consider using Laravel Horizon for better job monitoring in production
+
+### Queue worker not processing jobs
+
+If logs are not appearing in Loki, the queue worker might not be running:
+
+**Check if queue worker is running:**
+```bash
+# Check running processes
+ps aux | grep "queue:work"
+
+# For Horizon users
+php artisan horizon:status
+```
+
+**Start the queue worker:**
+```bash
+# Basic queue worker
+php artisan queue:work
+
+# With specific options
+php artisan queue:work --queue=default --tries=3 --timeout=90
+
+# For Horizon
+php artisan horizon
+```
+
+**Common issues:**
+1. **Worker not running** - Start it with `php artisan queue:work`
+2. **Wrong queue name** - Ensure the worker listens to the queue specified in `LOKI_QUEUE`
+3. **Worker crashed** - Check logs and restart with a process monitor (Supervisor)
+4. **Jobs stuck in queue** - Restart the queue worker to process pending jobs
+
+**Best practices:**
+- Always use a process monitor (Supervisor, systemd) in production
+- Monitor queue worker health and restart automatically on failure
+- Use `--tries=3` to retry failed jobs automatically
+- Consider using Laravel Horizon for Redis queues with advanced monitoring
 
 ## Architecture
 
 ```
-┌─────────────┐
-│   Your App  │
-└──────┬──────┘
-       │ Log::info()
+┌─────────────────────┐
+│    Your Laravel     │
+│    Application      │
+└──────┬──────────────┘
+       │ Log::info('message', ['context'])
        ▼
-┌──────────────────────┐
-│   In-Memory Buffer   │ ◄─── Fast: 10 logs (1s interval)
-└──────┬───────────────┘
-       │ Memory buffer full or time elapsed
-       ▼
-┌──────────────────────┐
-│    Cache Buffer      │ ◄─── Persistent: Redis/Cache (100 logs, 5s interval)
-│  (Redis/Laravel)     │
-└──────┬───────────────┘
-       │ Cache buffer full or time elapsed
-       ▼
-┌──────────────────────┐
-│  SendLogsToLoki Job  │ ◄─── Laravel Job (queued)
-└──────┬───────────────┘
-       │ Background processing
-       ▼
-┌──────────────────────┐
-│     LokiClient       │ ◄─── HTTP client
-└──────┬───────────────┘
-       │ HTTP POST
+┌──────────────────────────────────────────────┐
+│         LokiBufferedHandler                  │
+│                                              │
+│  ┌──────────────────────────────────────┐   │
+│  │     In-Memory Buffer (Layer 1)       │   │
+│  │  • Fast array in PHP process memory  │   │
+│  │  • Size: 10 logs (configurable)      │   │
+│  │  • Interval: 1.0s (configurable)     │   │
+│  │  • Shutdown handler ensures flush    │   │
+│  └──────┬───────────────────────────────┘   │
+│         │ Memory threshold reached/elapsed   │
+│         ▼                                    │
+│  ┌──────────────────────────────────────┐   │
+│  │     Cache Buffer (Layer 2)           │   │
+│  │  • Persistent storage (Redis/Cache)  │   │
+│  │  • Size: 100 logs (configurable)     │   │
+│  │  • Interval: 5.0s (configurable)     │   │
+│  │  • Thread-safe with locks            │   │
+│  └──────┬───────────────────────────────┘   │
+└─────────┼────────────────────────────────────┘
+          │ Cache threshold reached/elapsed
+          │ Dispatch job to queue
+          ▼
+┌──────────────────────────────────────────────┐
+│         Laravel Queue System                 │
+│  ┌────────────────────────────────────────┐ │
+│  │      SendLogsToLoki Job                │ │
+│  │                                        │ │
+│  │  • Implements ShouldQueue             │ │
+│  │  • Retries: 3 attempts                │ │
+│  │  • Backoff: 10s exponential           │ │
+│  │  • Groups logs by labels into streams │ │
+│  │  • Formats for Loki Push API          │ │
+│  └────────┬───────────────────────────────┘ │
+└───────────┼──────────────────────────────────┘
+            │ Background worker processes job
+            ▼
+┌──────────────────────────────────────────────┐
+│              LokiClient                      │
+│  • Sends HTTP POST to Loki Push API         │
+│  • Handles basic authentication             │
+│  • Returns success/failure status           │
+└──────┬───────────────────────────────────────┘
+       │ HTTP POST /loki/api/v1/push
        ▼
 ┌──────────────────────┐
 │   Grafana Loki       │
+│   Server             │
 └──────────────────────┘
 ```
+
+**Flow Summary:**
+1. **Application logs** → In-Memory Buffer (fast, no I/O)
+2. **Memory buffer flushes** → Cache Buffer (persistent, Redis/Laravel Cache)
+3. **Cache buffer flushes** → Dispatches `SendLogsToLoki` job to queue
+4. **Queue worker picks up job** → Processes asynchronously in background
+5. **Job sends logs** → HTTP POST to Loki Push API via `LokiClient`
+6. **Retry on failure** → Up to 3 attempts with 10s exponential backoff
 
 ## Performance Considerations
 
