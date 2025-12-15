@@ -258,17 +258,16 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 return;
             }
 
-            // Atomically get items and remove them from the list
-            // Using LRANGE to get all items, then LTRIM to remove them
-            // This is more efficient than RENAME + DEL and works naturally with RPUSH
+            // Atomically get all items and clear the list
+            // Using LRANGE to get all items, then DEL to remove the entire list
+            // This is simpler and atomic via pipeline
             try {
-                // Use pipeline to atomically read and remove items
-                $results = Redis::pipeline(function ($pipe) use ($bufferSize) {
-                    // Get all current items (0 to bufferSize-1)
-                    $pipe->lrange(self::BUFFER_KEY, 0, $bufferSize - 1);
-                    // Remove the items we just read by trimming the list
-                    // LTRIM keeps items from bufferSize to end (everything after what we read)
-                    $pipe->ltrim(self::BUFFER_KEY, $bufferSize, -1);
+                // Use pipeline to atomically read and delete
+                $results = Redis::pipeline(function ($pipe) {
+                    // Get all current items
+                    $pipe->lrange(self::BUFFER_KEY, 0, -1);
+                    // Delete the entire list
+                    $pipe->del(self::BUFFER_KEY);
                 });
 
                 $buffer = $results[0] ?? [];
