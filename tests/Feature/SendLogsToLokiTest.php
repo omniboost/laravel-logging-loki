@@ -8,8 +8,20 @@ use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionMethod;
 
+/**
+ * Feature Tests for Loki Stream Preparation with Structured Metadata
+ * 
+ * These tests verify that log entries are correctly formatted into Loki streams
+ * with structured metadata as the optional third element in the values array.
+ */
 class SendLogsToLokiTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        fwrite(STDERR, "\n");
+    }
+
     /**
      * Create a partial mock of SendLogsToLoki that doesn't call the constructor
      */
@@ -31,8 +43,15 @@ class SendLogsToLokiTest extends TestCase
         return $method->invokeArgs($object, $parameters);
     }
 
+    /**
+     * Test: Log entries without structured metadata use 2-element format
+     * 
+     * When a log entry has no structured metadata, the Loki values array
+     * should contain only [timestamp, line] (2 elements).
+     */
     public function testPrepareStreamsWithoutStructuredMetadata()
     {
+        fwrite(STDERR, "  → Testing stream without structured metadata (2-element format)...\n");
         $entries = [
             new LokiLogEntry(
                 stream: ['level' => 'info', 'app' => 'test'],
@@ -55,10 +74,19 @@ class SendLogsToLokiTest extends TestCase
         $this->assertCount(2, $values[0]); // Only timestamp and message
         $this->assertEquals('1234567890000000000', $values[0][0]);
         $this->assertEquals('Simple log message', $values[0][1]);
+        
+        fwrite(STDERR, "    ✓ Stream prepared with 2-element values array [timestamp, line]\n");
     }
 
+    /**
+     * Test: Log entries with structured metadata use 3-element format
+     * 
+     * When a log entry has structured metadata, the Loki values array
+     * should contain [timestamp, line, structuredMetadata] (3 elements).
+     */
     public function testPrepareStreamsWithStructuredMetadata()
     {
+        fwrite(STDERR, "  → Testing stream with structured metadata (3-element format)...\n");
         $entries = [
             new LokiLogEntry(
                 stream: ['level' => 'info', 'app' => 'test'],
@@ -84,10 +112,19 @@ class SendLogsToLokiTest extends TestCase
         $this->assertArrayHasKey('request_id', $values[0][2]);
         $this->assertEquals('123', $values[0][2]['user_id']);
         $this->assertEquals('abc-123', $values[0][2]['request_id']);
+        
+        fwrite(STDERR, "    ✓ Stream prepared with 3-element values array [timestamp, line, metadata]\n");
     }
 
+    /**
+     * Test: Mixed entries with and without metadata in same stream
+     * 
+     * A single stream can contain both 2-element entries (no metadata) and
+     * 3-element entries (with metadata) based on individual log entries.
+     */
     public function testPrepareStreamsMixedEntriesWithAndWithoutMetadata()
     {
+        fwrite(STDERR, "  → Testing mixed entries (some with, some without metadata)...\n");
         $entries = [
             new LokiLogEntry(
                 stream: ['level' => 'info'],
@@ -131,10 +168,19 @@ class SendLogsToLokiTest extends TestCase
         
         // Third entry without metadata
         $this->assertCount(2, $values[2]);
+        
+        fwrite(STDERR, "    ✓ Mixed entries correctly formatted (3-element and 2-element)\n");
     }
 
+    /**
+     * Test: Streams are grouped by their label sets
+     * 
+     * Log entries with different label combinations should be grouped into
+     * separate streams. This test verifies proper stream grouping logic.
+     */
     public function testPrepareStreamsGroupsByStreamLabels()
     {
+        fwrite(STDERR, "  → Testing stream grouping by labels...\n");
         $entries = [
             new LokiLogEntry(
                 stream: ['level' => 'info'],
@@ -179,10 +225,19 @@ class SendLogsToLokiTest extends TestCase
         $this->assertNotNull($errorStream);
         $this->assertCount(2, $infoStream['values']); // Two info messages
         $this->assertCount(1, $errorStream['values']); // One error message
+        
+        fwrite(STDERR, "    ✓ Entries correctly grouped into separate streams by labels\n");
     }
 
+    /**
+     * Test: Complex structured metadata with multiple fields
+     * 
+     * This test validates that complex, real-world structured metadata
+     * with many fields is correctly included in the stream values.
+     */
     public function testPrepareStreamsWithComplexStructuredMetadata()
     {
+        fwrite(STDERR, "  → Testing complex structured metadata scenario...\n");
         $entries = [
             new LokiLogEntry(
                 stream: ['level' => 'info'],
@@ -219,14 +274,26 @@ class SendLogsToLokiTest extends TestCase
         foreach ($metadata as $value) {
             $this->assertIsString($value);
         }
+        
+        fwrite(STDERR, "    ✓ Complex structured metadata correctly included\n");
     }
 
+    /**
+     * Test: Empty entries list returns empty streams array
+     * 
+     * When no log entries are provided, stream preparation should
+     * return an empty array without errors.
+     */
     public function testPrepareStreamsWithEmptyEntries()
     {
+        fwrite(STDERR, "  → Testing empty entries handling...\n");
+        
         $job = $this->createJobMock();
         $streams = $this->invokePrivateMethod($job, 'prepareStreams', [[]]);
 
         $this->assertIsArray($streams);
         $this->assertEmpty($streams);
+        
+        fwrite(STDERR, "    ✓ Empty entries returns empty streams array\n");
     }
 }
