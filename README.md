@@ -220,6 +220,7 @@ The `SendLogsToLoki` job is the core component that handles asynchronous log tra
 
 **Job Configuration:**
 ```php
+// In SendLogsToLoki class
 public int $tries = 3;        // Retry up to 3 times on failure
 public int $backoff = 10;     // Wait 10 seconds between retries (fixed delay)
 ```
@@ -493,7 +494,7 @@ php artisan horizon
 │  │                                        │ │
 │  │  • Implements ShouldQueue             │ │
 │  │  • Retries: 3 attempts                │ │
-│  │  • Backoff: 10s fixed delay         │ │
+│  │  • Backoff: 10s fixed delay           │ │
 │  │  • Groups logs by labels into streams │ │
 │  │  • Formats for Loki Push API          │ │
 │  └────────┬───────────────────────────────┘ │
