@@ -30,7 +30,10 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private int $memoryBufferSize;
     private float $memoryFlushInterval;
     private float $memoryBufferLastFlush;
+    
+    // Static registry for shutdown handlers
     private static bool $shutdownRegistered = false;
+    private static array $handlerInstances = [];
 
     /**
      * @param string $url Loki URL
@@ -73,10 +76,17 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->memoryFlushInterval = max(0.1, $memoryFlushInterval);
         $this->memoryBufferLastFlush = microtime(true);
         
-        // Register shutdown function once per process to flush memory buffer
+        // Register this instance for shutdown handling
+        self::$handlerInstances[] = $this;
+        
+        // Register shutdown function once per process to flush all handler instances
         if (!self::$shutdownRegistered) {
             register_shutdown_function(function () {
-                $this->flushMemoryBuffer();
+                foreach (self::$handlerInstances as $handler) {
+                    if ($handler instanceof self) {
+                        $handler->flushMemoryBuffer();
+                    }
+                }
             });
             self::$shutdownRegistered = true;
         }
@@ -142,9 +152,14 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 $this->bufferLog($logEntry);
             }
         } catch (\Throwable $e) {
-            // Silently fail to avoid breaking application
-            // In production, logs would already be in memory and would be
-            // attempted again on next flush or process end
+            // Log error to PHP error log to aid debugging
+            // We can't use Laravel Log here as it might cause recursion
+            error_log(sprintf(
+                'LokiBufferedHandler: Failed to flush memory buffer: %s in %s:%d',
+                $e->getMessage(),
+                $e->getFile(),
+                $e->getLine()
+            ));
         }
     }
 
