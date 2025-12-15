@@ -138,8 +138,22 @@ class FlushLokiBuffer implements ShouldQueue
             return;
         }
 
-        // Decode JSON entries
-        $decodedBuffer = array_map(fn($item) => LokiLogEntry::fromArray(json_decode($item, true)), $buffer);
+        // Decode JSON entries with null check
+        $decodedBuffer = [];
+        foreach ($buffer as $item) {
+            $decoded = json_decode($item, true);
+            if ($decoded !== null && is_array($decoded)) {
+                $decodedBuffer[] = LokiLogEntry::fromArray($decoded);
+            } elseif (config('loki.debug', false)) {
+                Log::channel('single')->warning('FlushLokiBuffer skipped malformed JSON entry', [
+                    'item' => $item,
+                ]);
+            }
+        }
+
+        if (empty($decodedBuffer)) {
+            return;
+        }
 
         // Get Loki configuration
         $url = config('loki.url');
@@ -168,7 +182,6 @@ class FlushLokiBuffer implements ShouldQueue
             $buffer = Cache::get(self::BUFFER_KEY, []);
 
             if (empty($buffer)) {
-                $bufferLock->release();
                 return;
             }
 
@@ -177,9 +190,6 @@ class FlushLokiBuffer implements ShouldQueue
 
             // Convert buffer to LokiLogEntry objects
             $decodedBuffer = array_map(fn($item) => LokiLogEntry::fromArray($item), $buffer);
-
-            // Release buffer lock before dispatching job
-            $bufferLock->release();
 
             // Get Loki configuration
             $url = config('loki.url');
@@ -192,6 +202,11 @@ class FlushLokiBuffer implements ShouldQueue
             // If we can't get the buffer lock, another process is using the buffer
             if (config('loki.debug', false)) {
                 Log::channel('single')->debug('FlushLokiBuffer could not acquire buffer lock');
+            }
+        } finally {
+            // Always release the buffer lock if it was acquired
+            if (isset($bufferLock)) {
+                $bufferLock->release();
             }
         }
     }

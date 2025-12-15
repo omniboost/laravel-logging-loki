@@ -238,6 +238,7 @@ class FlushLokiBufferTest extends TestCase
             ->andReturnUsing(function () {
                 $lock = Mockery::mock();
                 $lock->shouldReceive('get')->andReturn(false);
+                $lock->shouldReceive('release')->andReturn(true);
                 return $lock;
             });
 
