@@ -252,6 +252,142 @@ redirect_stderr=true
 stdout_logfile=/path/to/worker.log
 ```
 
+## Manual Log Flushing
+
+### Flush Command
+
+The package provides a command to manually flush all buffered Loki logs to ensure they are sent immediately. This is useful in scenarios where you need to guarantee logs are sent before an application shutdown or deployment.
+
+#### Running the Flush Command
+
+```bash
+php artisan omniboost:loki:flush
+```
+
+This command will:
+1. Discover all logging channels configured with the `omniboost:loki` driver
+2. Locate all `LokiBufferedLogger` handlers in those channels
+3. Flush both the in-memory buffer and cache buffer for each handler
+4. Dispatch jobs immediately to send logs to Loki
+
+**When to use this command:**
+- Before application deployment or shutdown
+- After critical log events that must be sent immediately
+- When debugging to ensure recent logs are visible in Grafana
+- In testing environments to verify log delivery
+
+**Example output:**
+```
+[loki] Flushing...
+[api-loki] Flushing...
+```
+
+### Scheduling the Flush Command
+
+You can schedule the flush command to run periodically using Laravel's Task Scheduler. This ensures logs are sent to Loki at regular intervals, even if buffer thresholds aren't reached.
+
+#### Basic Scheduling
+
+Add the following to your `app/Console/Kernel.php`:
+
+```php
+protected function schedule(Schedule $schedule): void
+{
+    // Flush Loki logs every minute
+    $schedule->command('omniboost:loki:flush')
+             ->everyMinute();
+}
+```
+
+#### Advanced Scheduling Examples
+
+**Flush every 5 minutes:**
+```php
+$schedule->command('omniboost:loki:flush')
+         ->everyFiveMinutes();
+```
+
+**Flush every hour:**
+```php
+$schedule->command('omniboost:loki:flush')
+         ->hourly();
+```
+
+**Flush at specific times:**
+```php
+// Flush every day at midnight
+$schedule->command('omniboost:loki:flush')
+         ->dailyAt('00:00');
+```
+
+**Flush only during business hours:**
+```php
+$schedule->command('omniboost:loki:flush')
+         ->everyFiveMinutes()
+         ->between('8:00', '17:00')
+         ->weekdays();
+```
+
+**Flush with output logging:**
+```php
+$schedule->command('omniboost:loki:flush')
+         ->everyMinute()
+         ->appendOutputTo(storage_path('logs/loki-flush.log'));
+```
+
+**Prevent overlapping flushes:**
+```php
+$schedule->command('omniboost:loki:flush')
+         ->everyMinute()
+         ->withoutOverlapping()
+         ->runInBackground();
+```
+
+#### When to Schedule Flushes
+
+**High-frequency scenarios (every 1-5 minutes):**
+- Production environments with critical logging requirements
+- When real-time log visibility is important
+- Applications with unpredictable traffic patterns
+- When buffer thresholds may not be reached regularly
+
+**Low-frequency scenarios (hourly or daily):**
+- Development environments
+- Applications with consistent high traffic (buffers fill naturally)
+- When queue workers handle flushing adequately
+- Cost-sensitive environments (fewer API calls to Loki)
+
+**Considerations:**
+- Scheduled flushes work alongside automatic buffer-based flushing
+- More frequent flushes = more real-time logs but more queue jobs
+- Less frequent flushes = reduced overhead but potential log delay
+- Monitor your queue depth to find the right balance
+
+### Programmatic Flushing
+
+You can also flush logs programmatically in your application code:
+
+```php
+use Illuminate\Support\Facades\Artisan;
+
+// Flush all Loki logs
+Artisan::call('omniboost:loki:flush');
+```
+
+Or flush a specific channel:
+
+```php
+use Illuminate\Support\Facades\Log;
+
+// Get the logger and flush directly
+$logger = Log::channel('loki')->getLogger();
+foreach ($logger->getHandlers() as $handler) {
+    if ($handler instanceof \Omniboost\LaravelLoggingLoki\Logging\LokiBufferedLogger) {
+        $handler->flush();
+    }
+}
+```
+
 ## Viewing Logs in Grafana
 
 1. Open Grafana and navigate to Explore

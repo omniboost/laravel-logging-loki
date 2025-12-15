@@ -136,7 +136,22 @@ class LokiBufferedHandler
 
     /**
      * Flush in-memory buffer to cache buffer
-     * This moves logs from memory to the persistent cache layer
+     *
+     * This method moves logs from the in-memory buffer to the persistent cache layer.
+     * It is called automatically when:
+     * - Memory buffer size threshold is reached
+     * - Memory flush interval has elapsed
+     * - Process shutdown (via register_shutdown_function)
+     * - Handler destructor is called
+     *
+     * The method is also exposed publicly to allow manual flushing via:
+     * - LokiFlushCommand (artisan omniboost:loki:flush)
+     * - Programmatic calls in application code
+     *
+     * Thread-safe: Uses atomic operations (Redis) or locks (other cache drivers)
+     * to prevent race conditions during concurrent access.
+     *
+     * @return void
      */
     public function flushMemoryBuffer(): void
     {
@@ -427,8 +442,30 @@ class LokiBufferedHandler
     }
 
     /**
-     * Flush buffered logs to the job queue
-     * Public method to allow manual flushing
+     * Flush buffered logs from cache to the job queue
+     *
+     * This method extracts all buffered logs from the cache layer and dispatches
+     * them to the SendLogsToLoki job for asynchronous processing.
+     *
+     * The flush operation is triggered when:
+     * - Cache buffer size threshold is reached
+     * - Cache flush interval has elapsed
+     * - Manual flush is requested (via LokiFlushCommand or programmatic call)
+     *
+     * Thread-safety:
+     * - Uses Redis atomic operations (LRANGE + LTRIM) when Redis is the cache driver
+     * - Uses distributed locks for non-Redis cache drivers
+     * - Prevents double-flushing via FLUSH_LOCK_KEY
+     * - Ensures no log loss during concurrent access
+     *
+     * Process:
+     * 1. Acquires flush lock to prevent concurrent flush operations
+     * 2. Atomically reads and clears the cache buffer
+     * 3. Decodes buffer entries to LokiLogEntry objects
+     * 4. Dispatches SendLogsToLoki job with the entries
+     * 5. Releases lock
+     *
+     * @return void
      */
     public function flush(): void
     {
