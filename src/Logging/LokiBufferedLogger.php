@@ -57,9 +57,26 @@ class LokiBufferedLogger extends AbstractProcessingHandler
         $this->getHandler()->write($record);
     }
 
+    /**
+     * Get the underlying LokiBufferedHandler instance
+     */
     public function getHandler(): LokiBufferedHandler
     {
         return $this->handler;
+    }
+
+    public function getCommand(): string
+    {
+        return 'loki:flush';
+    }
+
+    /**
+     * Flush both memory buffer and persistent buffer
+     */
+    public function flush(): void
+    {
+        $this->getHandler()->flushMemoryBuffer();
+        $this->getHandler()->flush();
     }
 
     /**
@@ -67,8 +84,7 @@ class LokiBufferedLogger extends AbstractProcessingHandler
      */
     public function close(): void
     {
-        $this->getHandler()->flushMemoryBuffer();
-        $this->getHandler()->flush();
+        $this->flush();
         parent::close();
     }
 

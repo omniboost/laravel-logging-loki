@@ -8,6 +8,7 @@ use Monolog\Logger;
 use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
 use Omniboost\LaravelLoggingLoki\Formatters\LokiFormatter;
 use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedLogger;
+use Omniboost\LaravelLoggingLoki\Commands\LokiFlushCommand;
 
 class LokiServiceProvider extends ServiceProvider
 {
@@ -59,5 +60,10 @@ class LokiServiceProvider extends ServiceProvider
 
             return new Logger($config['name'] ?? 'loki', [$handler]);
         });
+
+        // Register commands
+        $this->commands([
+            LokiFlushCommand::class,
+        ]);
     }
 }
