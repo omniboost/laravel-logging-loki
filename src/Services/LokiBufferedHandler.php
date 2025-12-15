@@ -1,16 +1,14 @@
 <?php
 
-namespace Omniboost\LaravelLoggingLoki\Logging;
+namespace Omniboost\LaravelLoggingLoki\Services;
 
-use Monolog\Handler\AbstractProcessingHandler;
 use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\Jobs\SendLogsToLoki;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
-use Illuminate\Support\Facades\Log;
 
-class LokiBufferedHandler extends AbstractProcessingHandler
+class LokiBufferedHandler
 {
     private const BUFFER_KEY = 'loki:log:buffer';
     private const BUFFER_LOCK_KEY = 'loki:log:buffer:lock';
@@ -50,19 +48,15 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     public function __construct(
         string $url,
-        int $level = \Monolog\Level::Debug->value,
         int $bufferSize = 100,
         float $flushInterval = 5.0,
         array $defaultLabels = [],
         ?string $username = null,
         ?string $password = null,
         string $structuredMetadataPrefix = '',
-        bool $bubble = true,
         int $memoryBufferSize = 100,
         float $memoryFlushInterval = 1.0
     ) {
-        parent::__construct($level, $bubble);
-
         $this->url = $url;
         $this->bufferSize = $bufferSize;
         $this->flushInterval = $flushInterval;
@@ -103,9 +97,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * {@inheritdoc}
+     * Write logs into the buffered handler.
      */
-    protected function write(LogRecord $record): void
+    public function write(LogRecord $record): void
     {
         $logEntry = $this->prepareLogEntry($record);
         $this->addToMemoryBuffer($logEntry);
@@ -144,7 +138,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      * Flush in-memory buffer to cache buffer
      * This moves logs from memory to the persistent cache layer
      */
-    private function flushMemoryBuffer(): void
+    public function flushMemoryBuffer(): void
     {
         if (empty($this->memoryBuffer)) {
             return;
@@ -572,23 +566,5 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Always release the flush lock
             $flushLock->release();
         }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function close(): void
-    {
-        $this->flushMemoryBuffer();
-        $this->flush();
-        parent::close();
-    }
-
-    /**
-     * Destructor - ensure memory buffer is flushed
-     */
-    public function __destruct()
-    {
-        $this->flushMemoryBuffer();
     }
 }

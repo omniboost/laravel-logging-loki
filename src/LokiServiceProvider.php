@@ -5,8 +5,9 @@ namespace Omniboost\LaravelLoggingLoki;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use Monolog\Logger;
-use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedHandler;
+use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
 use Omniboost\LaravelLoggingLoki\Formatters\LokiFormatter;
+use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedLogger;
 
 class LokiServiceProvider extends ServiceProvider
 {
@@ -32,18 +33,21 @@ class LokiServiceProvider extends ServiceProvider
 
         // Register custom logging driver
         Log::extend('omniboost:loki', function ($app, array $config) {
-            $handler = new LokiBufferedHandler(
-                url: $config['url'] ?? config('loki.url'),
+            $handler = new LokiBufferedLogger(
                 level: Logger::toMonologLevel($config['level'] ?? config('loki.level', 'debug'))->value,
-                bufferSize: $config['buffer_size'] ?? config('loki.buffer_size', 100),
-                flushInterval: $config['flush_interval'] ?? config('loki.flush_interval', 5.0),
-                defaultLabels: $config['labels'] ?? config('loki.labels', []),
-                username: $config['username'] ?? config('loki.username'),
-                password: $config['password'] ?? config('loki.password'),
-                structuredMetadataPrefix: $config['structured_metadata_prefix'] ?? config('loki.structured_metadata_prefix', ''),
                 bubble: $config['bubble'] ?? true,
-                memoryBufferSize: $config['memory_buffer_size'] ?? config('loki.memory_buffer_size', 10),
-                memoryFlushInterval: $config['memory_flush_interval'] ?? config('loki.memory_flush_interval', 1.0)
+
+                handler: new LokiBufferedHandler(
+                    url: $config['url'] ?? config('loki.url'),
+                    bufferSize: $config['buffer_size'] ?? config('loki.buffer_size', 100),
+                    flushInterval: $config['flush_interval'] ?? config('loki.flush_interval', 5.0),
+                    defaultLabels: $config['labels'] ?? config('loki.labels', []),
+                    username: $config['username'] ?? config('loki.username'),
+                    password: $config['password'] ?? config('loki.password'),
+                    structuredMetadataPrefix: $config['structured_metadata_prefix'] ?? config('loki.structured_metadata_prefix', ''),
+                    memoryBufferSize: $config['memory_buffer_size'] ?? config('loki.memory_buffer_size', 10),
+                    memoryFlushInterval: $config['memory_flush_interval'] ?? config('loki.memory_flush_interval', 1.0)
+                )
             );
 
             // Optionally set custom formatter

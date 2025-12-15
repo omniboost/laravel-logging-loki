@@ -4,7 +4,8 @@ namespace Omniboost\LaravelLoggingLoki\Tests\Unit;
 
 use Monolog\Level;
 use Monolog\LogRecord;
-use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedHandler;
+use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
+
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionProperty;
@@ -53,14 +54,12 @@ class MemoryBufferTest extends TestCase
     ): LokiBufferedHandler {
         return new LokiBufferedHandler(
             url: 'http://localhost:3100',
-            level: Level::Debug->value,
             bufferSize: 100,
             flushInterval: 5.0,
             defaultLabels: ['app' => 'test'],
             username: null,
             password: null,
             structuredMetadataPrefix: '',
-            bubble: true,
             memoryBufferSize: $memoryBufferSize,
             memoryFlushInterval: $memoryFlushInterval
         );
@@ -388,7 +387,6 @@ class MemoryBufferTest extends TestCase
         // Create handler with default values
         $handler = new LokiBufferedHandler(
             url: 'http://localhost:3100',
-            level: Level::Debug->value
         );
 
         $memoryBufferSize = $this->getPrivateProperty($handler, 'memoryBufferSize');
