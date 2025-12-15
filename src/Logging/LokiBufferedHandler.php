@@ -239,7 +239,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * Flush buffer using Redis pipeline (atomic)
+     * Flush buffer using Redis atomic operations
      */
     private function flushRedis(): void
     {
@@ -258,29 +258,27 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 return;
             }
 
-            // Atomically get all items and delete the list using a unique temporary key
-            // This prevents race conditions where new logs are added during flush
-            $tempKey = self::BUFFER_KEY . ':flushing:' . uniqid();
-            
-            // RENAME is atomic - moves buffer to temp key and clears original
-            // Redis throws an exception if source key doesn't exist
+            // Atomically get items and remove them from the list
+            // Using LRANGE to get all items, then LTRIM to remove them
+            // This is more efficient than RENAME + DEL and works naturally with RPUSH
             try {
-                Redis::rename(self::BUFFER_KEY, $tempKey);
+                // Use pipeline to atomically read and remove items
+                $results = Redis::pipeline(function ($pipe) use ($bufferSize) {
+                    // Get all current items (0 to bufferSize-1)
+                    $pipe->lrange(self::BUFFER_KEY, 0, $bufferSize - 1);
+                    // Remove the items we just read by trimming the list
+                    // LTRIM keeps items from bufferSize to end (everything after what we read)
+                    $pipe->ltrim(self::BUFFER_KEY, $bufferSize, -1);
+                });
+
+                $buffer = $results[0] ?? [];
             } catch (\RedisException | \Predis\Response\ServerException $e) {
-                // Key doesn't exist - another process already flushed it
-                // Or other Redis errors (connection, permissions, etc.)
-                // Either way, we can't flush, so return
+                // Redis errors (connection, permissions, etc.)
                 return;
             } catch (\Exception $e) {
                 // Catch any other Redis-related exceptions for safety
                 return;
             }
-
-            // Now read from the temporary key (no race condition possible)
-            $buffer = Redis::lrange($tempKey, 0, -1);
-            
-            // Delete the temporary key
-            Redis::del($tempKey);
 
             if (empty($buffer)) {
                 return;
