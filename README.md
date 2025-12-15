@@ -351,7 +351,7 @@ composer test
 
 ### Continuous Integration
 
-This project uses GitHub Actions for continuous integration. The test suite automatically runs on all pull requests against multiple PHP versions (8.1, 8.2, 8.3) and Laravel versions (10.x, 11.x).
+This project uses GitHub Actions for continuous integration. The test suite automatically runs on all pull requests against multiple PHP versions (8.2, 8.3) and Laravel versions (10.x, 11.x).
 
 **Status checks are required to pass before merging pull requests.**
 
