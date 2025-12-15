@@ -23,6 +23,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private ?string $username;
     private ?string $password;
     private array $defaultLabels;
+    private string $structuredMetadataPrefix;
 
     /**
      * @param string $url Loki URL
@@ -32,6 +33,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      * @param array $defaultLabels Default labels to apply to all logs
      * @param string|null $username Optional basic auth username
      * @param string|null $password Optional basic auth password
+     * @param string $structuredMetadataPrefix Prefix for extracting structured metadata from context
      * @param bool $bubble Whether to bubble the record to the next handler
      */
     public function __construct(
@@ -42,6 +44,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         array $defaultLabels = [],
         ?string $username = null,
         ?string $password = null,
+        string $structuredMetadataPrefix = '',
         bool $bubble = true
     ) {
         parent::__construct($level, $bubble);
@@ -52,6 +55,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->username = $username;
         $this->password = $password;
         $this->defaultLabels = $defaultLabels;
+        $this->structuredMetadataPrefix = $structuredMetadataPrefix;
     }
 
     /**
@@ -190,6 +194,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     private function prepareLogEntry(LogRecord $record): LokiLogEntry
     {
+        // Extract structured metadata from context based on prefix configuration
+        $structuredMetadata = $this->extractStructuredMetadata($record->context);
+
         $logEntry = new LokiLogEntry(
             // Labels will be set later
             [],
@@ -198,7 +205,10 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             ($record->formatted ?? $record->message),
 
             // Timestamp in nanoseconds
-            (string)($record->datetime->getTimestamp() * 1000000000)
+            (string)($record->datetime->getTimestamp() * 1000000000),
+
+            // Structured metadata
+            $structuredMetadata
         );
 
         // Combine default labels with standard labels
@@ -213,6 +223,88 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $logEntry->stream = $labels;
 
         return $logEntry;
+    }
+
+    /**
+     * Extract structured metadata from context based on prefix configuration
+     *
+     * @param array $context Log context array
+     * @return array<string, string>
+     */
+    private function extractStructuredMetadata(array $context): array
+    {
+        // If context is empty, return empty array
+        if (empty($context)) {
+            return [];
+        }
+
+        // Remove 'labels' key from structured metadata as it's handled separately
+        $contextWithoutLabels = array_filter(
+            $context,
+            fn($key) => $key !== 'labels',
+            ARRAY_FILTER_USE_KEY
+        );
+
+        // If no prefix is configured, include all context as structured metadata
+        if (empty($this->structuredMetadataPrefix)) {
+            return $this->sanitizeStructuredMetadata($contextWithoutLabels);
+        }
+
+        // Extract only fields that start with the prefix
+        $structuredMetadata = [];
+        $prefixLength = strlen($this->structuredMetadataPrefix);
+
+        foreach ($contextWithoutLabels as $key => $value) {
+            if (str_starts_with($key, $this->structuredMetadataPrefix)) {
+                // Remove the prefix from the key
+                $cleanKey = substr($key, $prefixLength);
+
+                // Skip if the clean key is empty (key was exactly the prefix)
+                if ($cleanKey !== '') {
+                    $structuredMetadata[$cleanKey] = $value;
+                }
+            }
+        }
+
+        return $this->sanitizeStructuredMetadata($structuredMetadata);
+    }
+
+    /**
+     * Sanitize structured metadata to comply with Loki requirements
+     * - Only string values (no null, objects, or arrays)
+     * - Converts scalars to strings
+     * - JSON encodes complex types
+     *
+     * @param array $metadata
+     * @return array<string, string>
+     */
+    private function sanitizeStructuredMetadata(array $metadata): array
+    {
+        $sanitized = [];
+
+        foreach ($metadata as $key => $value) {
+            // Skip null values - Loki doesn't accept them
+            if ($value === null) {
+                continue;
+            }
+
+            // JSON encode arrays and objects - Loki only accepts flat key-value pairs
+            if (is_array($value) || is_object($value)) {
+                $sanitized[$key] = json_encode($value);
+                continue;
+            }
+
+            // Convert boolean to string
+            if (is_bool($value)) {
+                $sanitized[$key] = $value ? 'true' : 'false';
+                continue;
+            }
+
+            // Convert scalar values to strings
+            $sanitized[$key] = (string) $value;
+        }
+
+        return $sanitized;
     }
 
     /**
@@ -303,7 +395,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     {
         // First, acquire FLUSH_LOCK_KEY to prevent multiple concurrent flush operations
         $flushLock = Cache::lock(self::FLUSH_LOCK_KEY, 5);
-        
+
         if (!$flushLock->get()) {
             return; // Another process is already flushing
         }
@@ -318,10 +410,10 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 // Try to get the buffer lock
                 if ($bufferLock->get()) {
                     $bufferLockAcquired = true;
-                    
+
                     // Atomically extract and clear the buffer within the lock
                     $buffer = Cache::get(self::BUFFER_KEY, []);
-                    
+
                     if (empty($buffer)) {
                         // Release buffer lock before returning
                         $bufferLock->release();
@@ -339,7 +431,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                     // Release buffer lock before dispatching job to avoid blocking buffer operations
                     $bufferLock->release();
                     $bufferLockAcquired = false;
-                    
+
                     // Flush buffer (dispatch job) - still holding flush lock
                     $this->flushBuffer($decodedBuffer);
                 }

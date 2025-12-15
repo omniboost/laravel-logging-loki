@@ -7,6 +7,11 @@
             "Omniboost\\LaravelLoggingLoki\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Omniboost\\LaravelLoggingLoki\\Tests\\": "tests/"
+        }
+    },
     "authors": [
         {
             "name": "Bart Versluijs",
@@ -19,6 +24,14 @@
         "illuminate/queue": "^10.0|^11.0",
         "guzzlehttp/guzzle": "^7.0",
         "monolog/monolog": "^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0|^11.0",
+        "mockery/mockery": "^1.6",
+        "orchestra/testbench": "^8.0|^9.0"
+    },
+    "scripts": {
+        "test": "phpunit"
     },
     "extra": {
         "laravel": {

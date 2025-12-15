@@ -136,13 +136,17 @@ class SendLogsToLoki implements ShouldQueue
                 $streamsById->{$streamId} = $stream;
             }
 
+            // Build the log entry value array for Loki
+            // Format: [timestamp, line, structuredMetadata (optional)]
+            $value = [$logEntry->timestamp, $logEntry->entry];
+            
+            // Add structured metadata as third element if present
+            if (!empty($logEntry->structuredMetadata)) {
+                $value[] = $logEntry->structuredMetadata;
+            }
+
             // Add values to the existing stream
-            $streamsById->{$streamId}->add([
-                [
-                    $logEntry->timestamp,
-                    $logEntry->entry
-                ]
-            ]);
+            $streamsById->{$streamId}->add([$value]);
         }
 
         // Convert streams object to array and return it

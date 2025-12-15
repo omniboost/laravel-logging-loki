@@ -87,4 +87,20 @@ return [
     |
     */
     'debug' => env('LOKI_DEBUG', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Structured Metadata Prefix
+    |--------------------------------------------------------------------------
+    |
+    | Configure a prefix for extracting structured metadata from log context.
+    | If left empty (default), all context data is added as structured metadata.
+    | If set, only context fields starting with this prefix will be extracted
+    | and included as structured metadata in the Loki payload.
+    |
+    | Example: Setting 'meta_' means context fields like 'meta_user_id'
+    | and 'meta_request_id' will be included as structured metadata, while others won't.
+    |
+    */
+    'structured_metadata_prefix' => env('LOKI_STRUCTURED_METADATA_PREFIX', ''),
 ];
