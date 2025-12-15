@@ -39,7 +39,7 @@ class StructuredMetadataTest extends TestCase
     private function createLogRecord(array $context = []): LogRecord
     {
         return new LogRecord(
-            datetime: new DateTime(),
+            datetime: new \DateTimeImmutable(),
             channel: 'test',
             level: Level::Info,
             message: 'Test message',

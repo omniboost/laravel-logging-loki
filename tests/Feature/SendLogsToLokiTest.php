@@ -6,9 +6,22 @@ use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Omniboost\LaravelLoggingLoki\Jobs\SendLogsToLoki;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
+use ReflectionMethod;
 
 class SendLogsToLokiTest extends TestCase
 {
+    /**
+     * Create a partial mock of SendLogsToLoki that doesn't call the constructor
+     */
+    private function createJobMock(): SendLogsToLoki
+    {
+        // Create instance without calling constructor to avoid config() call
+        $reflection = new ReflectionClass(SendLogsToLoki::class);
+        $instance = $reflection->newInstanceWithoutConstructor();
+        
+        return $instance;
+    }
+
     private function invokePrivateMethod($object, $methodName, array $parameters = [])
     {
         $reflection = new ReflectionClass(get_class($object));
@@ -29,7 +42,7 @@ class SendLogsToLokiTest extends TestCase
             ),
         ];
 
-        $job = new SendLogsToLoki($entries, 'http://localhost:3100', null, null);
+        $job = $this->createJobMock();
         $streams = $this->invokePrivateMethod($job, 'prepareStreams', [$entries]);
 
         $this->assertIsArray($streams);
@@ -55,7 +68,7 @@ class SendLogsToLokiTest extends TestCase
             ),
         ];
 
-        $job = new SendLogsToLoki($entries, 'http://localhost:3100', null, null);
+        $job = $this->createJobMock();
         $streams = $this->invokePrivateMethod($job, 'prepareStreams', [$entries]);
 
         $this->assertIsArray($streams);
@@ -96,7 +109,7 @@ class SendLogsToLokiTest extends TestCase
             ),
         ];
 
-        $job = new SendLogsToLoki($entries, 'http://localhost:3100', null, null);
+        $job = $this->createJobMock();
         $streams = $this->invokePrivateMethod($job, 'prepareStreams', [$entries]);
 
         $this->assertIsArray($streams);
@@ -143,7 +156,7 @@ class SendLogsToLokiTest extends TestCase
             ),
         ];
 
-        $job = new SendLogsToLoki($entries, 'http://localhost:3100', null, null);
+        $job = $this->createJobMock();
         $streams = $this->invokePrivateMethod($job, 'prepareStreams', [$entries]);
 
         $this->assertIsArray($streams);
@@ -186,7 +199,7 @@ class SendLogsToLokiTest extends TestCase
             ),
         ];
 
-        $job = new SendLogsToLoki($entries, 'http://localhost:3100', null, null);
+        $job = $this->createJobMock();
         $streams = $this->invokePrivateMethod($job, 'prepareStreams', [$entries]);
 
         $this->assertIsArray($streams);
@@ -210,7 +223,7 @@ class SendLogsToLokiTest extends TestCase
 
     public function testPrepareStreamsWithEmptyEntries()
     {
-        $job = new SendLogsToLoki([], 'http://localhost:3100', null, null);
+        $job = $this->createJobMock();
         $streams = $this->invokePrivateMethod($job, 'prepareStreams', [[]]);
 
         $this->assertIsArray($streams);
