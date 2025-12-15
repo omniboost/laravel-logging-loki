@@ -255,10 +255,14 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $prefixLength = strlen($this->extraPrefix);
 
         foreach ($contextWithoutLabels as $key => $value) {
-            if (strpos($key, $this->extraPrefix) === 0) {
+            if (str_starts_with($key, $this->extraPrefix)) {
                 // Remove the prefix from the key
                 $cleanKey = substr($key, $prefixLength);
-                $extras[$cleanKey] = $value;
+                
+                // Skip if the clean key is empty (key was exactly the prefix)
+                if ($cleanKey !== '') {
+                    $extras[$cleanKey] = $value;
+                }
             }
         }
 

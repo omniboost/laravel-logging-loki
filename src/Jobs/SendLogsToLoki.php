@@ -140,7 +140,11 @@ class SendLogsToLoki implements ShouldQueue
             $entry = $logEntry->entry;
             if (!empty($logEntry->extras)) {
                 // Append extras as JSON to the log entry
-                $entry .= ' ' . json_encode($logEntry->extras);
+                // Use JSON_PARTIAL_OUTPUT_ON_ERROR to prevent job failures from non-serializable data
+                $extrasJson = json_encode($logEntry->extras, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_SLASHES);
+                if ($extrasJson !== false) {
+                    $entry .= ' ' . $extrasJson;
+                }
             }
 
             // Add values to the existing stream
