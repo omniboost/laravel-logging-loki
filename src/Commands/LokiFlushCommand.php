@@ -6,26 +6,61 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedLogger;
 
+/**
+ * Command to flush all buffered Loki logs immediately
+ *
+ * This command discovers all logging channels configured with the 'omniboost:loki' driver
+ * and flushes their buffers to ensure logs are sent to Loki without waiting for
+ * buffer size or time thresholds to be reached.
+ *
+ * Use cases:
+ * - Before application deployment or shutdown
+ * - After critical log events that must be sent immediately
+ * - When debugging to ensure recent logs are visible in Grafana
+ * - In testing environments to verify log delivery
+ *
+ * The command can be scheduled using Laravel's Task Scheduler:
+ * $schedule->command('omniboost:loki:flush')->everyMinute();
+ *
+ * @package Omniboost\LaravelLoggingLoki\Commands
+ */
 class LokiFlushCommand extends Command
 {
   /**
-   * {@inheritdoc}
+   * The name and signature of the console command
+   *
+   * @var string
    */
   protected $signature = 'omniboost:loki:flush';
 
   /**
-   * {@inheritdoc}
+   * The console command description
+   *
+   * @var string
    */
-  protected $description = 'This command puts the Shiji integrations into a Queue to process the Full Revenue';
+  protected $description = 'Flush all buffered Loki logs to ensure they are sent to Loki immediately';
 
   /**
-   * {@inheritdoc}
+   * Create a new command instance
+   *
+   * @return void
    */
   public function __construct()
   {
-    return parent::__construct();
+    parent::__construct();
   }
 
+  /**
+   * Execute the console command
+   *
+   * This method performs the following steps:
+   * 1. Discovers all Loki logging channels from config/logging.php
+   * 2. Retrieves logger instances for each Loki channel
+   * 3. Extracts LokiBufferedLogger handlers from each logger
+   * 4. Flushes both memory and cache buffers for each handler
+   *
+   * @return void
+   */
   public function handle(): void {
     // Get all loggers
     $loggers = $this->getLoggers();
@@ -41,7 +76,12 @@ class LokiFlushCommand extends Command
   }
 
   /**
-   * Get all registered loggers
+   * Get all registered Loki loggers from configured channels
+   *
+   * Scans all logging channels in config/logging.php and returns logger instances
+   * for channels using the 'omniboost:loki' driver.
+   *
+   * @return array<string, \Monolog\Logger> Associative array of channel name => Logger instance
    */
   public function getLoggers(): array
   {
@@ -70,7 +110,13 @@ class LokiFlushCommand extends Command
   }
 
   /**
-   * Get all registered loggers
+   * Extract LokiBufferedLogger handlers from logger instances
+   *
+   * Iterates through each logger and extracts handlers that are instances of
+   * LokiBufferedLogger, which are the handlers that can be flushed.
+   *
+   * @param array<string, \Monolog\Logger> $loggers Array of logger instances keyed by channel name
+   * @return array<string, LokiBufferedLogger> Associative array of channel name => LokiBufferedLogger handler
    */
   public function getHandlers(array $loggers): array
   {
