@@ -323,6 +323,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                     $buffer = Cache::get(self::BUFFER_KEY, []);
                     
                     if (empty($buffer)) {
+                        // Release buffer lock before returning
+                        $bufferLock->release();
+                        $bufferLockAcquired = false;
                         return;
                     }
 
@@ -345,7 +348,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             } finally {
                 // Only release buffer lock if still acquired
                 if ($bufferLockAcquired) {
-                    optional($bufferLock)->release();
+                    $bufferLock->release();
                 }
             }
         } finally {
