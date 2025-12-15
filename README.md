@@ -38,6 +38,7 @@ LOKI_FLUSH_INTERVAL=5.0
 LOKI_QUEUE=default
 LOKI_LOG_LEVEL=debug
 LOKI_DEBUG=false
+LOKI_EXTRA_PREFIX=
 ```
 
 ## Configuration
@@ -58,6 +59,7 @@ Add the Loki channel to your `config/logging.php`:
         'flush_interval' => env('LOKI_FLUSH_INTERVAL', 5.0),
         'username' => env('LOKI_USERNAME'),
         'password' => env('LOKI_PASSWORD'),
+        'extra_prefix' => env('LOKI_EXTRA_PREFIX', ''),
         'labels' => [
             'app' => env('APP_NAME', 'laravel'),
             'env' => env('APP_ENV', 'production'),
@@ -117,6 +119,47 @@ Log::info('API request completed', [
 ]);
 ```
 
+### Adding Extra Metadata
+
+You can include additional context data as "extras" in your logs. The `extra_prefix` configuration controls how extras are extracted from the log context:
+
+#### Include All Context as Extras (Default)
+
+When `extra_prefix` is empty (default), all context data (except `labels`) is added as extras:
+
+```php
+Log::info('User action', [
+    'user_id' => 123,
+    'action' => 'login',
+    'ip_address' => '192.168.1.1',
+]);
+// All three fields (user_id, action, ip_address) will be included as extras
+```
+
+#### Selective Extras with Prefix
+
+Set a prefix to only include specific context fields as extras:
+
+```php
+// In .env or config
+LOKI_EXTRA_PREFIX=extra_
+
+// In your code
+Log::info('Payment processed', [
+    'extra_user_id' => 456,
+    'extra_order_id' => 789,
+    'extra_amount' => 99.99,
+    'internal_flag' => true,  // Not included (no prefix)
+]);
+// Only user_id, order_id, and amount will be included as extras (prefix removed)
+```
+
+**Common Use Cases:**
+- User identifiers: `extra_user_id`, `extra_username`
+- Request tracking: `extra_request_id`, `extra_session_id`
+- Business context: `extra_order_id`, `extra_transaction_id`
+- Performance metrics: `extra_duration_ms`, `extra_memory_mb`
+
 ### Channel-specific Logging
 
 Log only to Loki:
@@ -155,6 +198,7 @@ Log::stack(['loki', 'slack'])->critical('Critical error occurred!');
 | `level` | Minimum log level | `debug` |
 | `debug` | Enable debug logging | `false` |
 | `labels` | Default labels for all logs | `['app', 'env', 'server']` |
+| `extra_prefix` | Prefix for extracting extras from context | `''` (empty = all context) |
 
 ## Queue Configuration
 

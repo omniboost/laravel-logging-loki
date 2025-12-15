@@ -40,6 +40,7 @@ class LokiServiceProvider extends ServiceProvider
                 defaultLabels: $config['labels'] ?? config('loki.labels', []),
                 username: $config['username'] ?? config('loki.username'),
                 password: $config['password'] ?? config('loki.password'),
+                extraPrefix: $config['extra_prefix'] ?? config('loki.extra_prefix', ''),
                 bubble: $config['bubble'] ?? true
             );
 

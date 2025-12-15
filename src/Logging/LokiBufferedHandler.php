@@ -23,6 +23,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private ?string $username;
     private ?string $password;
     private array $defaultLabels;
+    private string $extraPrefix;
 
     /**
      * @param string $url Loki URL
@@ -32,6 +33,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      * @param array $defaultLabels Default labels to apply to all logs
      * @param string|null $username Optional basic auth username
      * @param string|null $password Optional basic auth password
+     * @param string $extraPrefix Prefix for extracting extra metadata from context
      * @param bool $bubble Whether to bubble the record to the next handler
      */
     public function __construct(
@@ -42,6 +44,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         array $defaultLabels = [],
         ?string $username = null,
         ?string $password = null,
+        string $extraPrefix = '',
         bool $bubble = true
     ) {
         parent::__construct($level, $bubble);
@@ -52,6 +55,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->username = $username;
         $this->password = $password;
         $this->defaultLabels = $defaultLabels;
+        $this->extraPrefix = $extraPrefix;
     }
 
     /**
@@ -190,6 +194,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     private function prepareLogEntry(LogRecord $record): LokiLogEntry
     {
+        // Extract extras from context based on prefix configuration
+        $extras = $this->extractExtras($record->context);
+
         $logEntry = new LokiLogEntry(
             // Labels will be set later
             [],
@@ -198,7 +205,10 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             ($record->formatted ?? $record->message),
 
             // Timestamp in nanoseconds
-            (string)($record->datetime->getTimestamp() * 1000000000)
+            (string)($record->datetime->getTimestamp() * 1000000000),
+
+            // Extras
+            $extras
         );
 
         // Combine default labels with standard labels
@@ -213,6 +223,46 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $logEntry->stream = $labels;
 
         return $logEntry;
+    }
+
+    /**
+     * Extract extras from context based on prefix configuration
+     *
+     * @param array $context Log context array
+     * @return array<string, mixed>
+     */
+    private function extractExtras(array $context): array
+    {
+        // If context is empty, return empty array
+        if (empty($context)) {
+            return [];
+        }
+
+        // Remove 'labels' key from extras as it's handled separately
+        $contextWithoutLabels = array_filter(
+            $context,
+            fn($key) => $key !== 'labels',
+            ARRAY_FILTER_USE_KEY
+        );
+
+        // If no prefix is configured, include all context as extras
+        if (empty($this->extraPrefix)) {
+            return $contextWithoutLabels;
+        }
+
+        // Extract only fields that start with the prefix
+        $extras = [];
+        $prefixLength = strlen($this->extraPrefix);
+
+        foreach ($contextWithoutLabels as $key => $value) {
+            if (strpos($key, $this->extraPrefix) === 0) {
+                // Remove the prefix from the key
+                $cleanKey = substr($key, $prefixLength);
+                $extras[$cleanKey] = $value;
+            }
+        }
+
+        return $extras;
     }
 
     /**

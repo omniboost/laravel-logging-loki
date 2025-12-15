@@ -136,11 +136,18 @@ class SendLogsToLoki implements ShouldQueue
                 $streamsById->{$streamId} = $stream;
             }
 
+            // Build the log entry with extras if present
+            $entry = $logEntry->entry;
+            if (!empty($logEntry->extras)) {
+                // Append extras as JSON to the log entry
+                $entry .= ' ' . json_encode($logEntry->extras);
+            }
+
             // Add values to the existing stream
             $streamsById->{$streamId}->add([
                 [
                     $logEntry->timestamp,
-                    $logEntry->entry
+                    $entry
                 ]
             ]);
         }

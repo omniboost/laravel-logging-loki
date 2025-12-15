@@ -10,41 +10,45 @@ namespace Omniboost\LaravelLoggingLoki\DTOs;
 class LokiLogEntry
 {
     /**
-     * @param array<string, string> $labels Key-value pairs of labels (e.g., ['level' => 'info', 'channel' => 'application'])
+     * @param array<string, string> $stream Key-value pairs of labels (e.g., ['level' => 'info', 'channel' => 'application'])
      * @param string $entry The actual log message/content
      * @param string $timestamp Unix timestamp in nanoseconds (string to prevent precision loss)
+     * @param array<string, mixed> $extras Additional metadata/context to include in the log entry
      */
     public function __construct(
         public array $stream,
         public string $entry,
-        public string $timestamp
+        public string $timestamp,
+        public array $extras = []
     ) {}
 
     /**
      * Convert to array format
      *
-     * @return array{entry: string, labels: array<string, string>, timestamp: string}
+     * @return array{stream: array<string, string>, entry: string, timestamp: string, extras: array<string, mixed>}
      */
     public function toArray(): array
     {
         return [
             'stream' => $this->stream,
             'entry' => $this->entry,
-            'timestamp' => $this->timestamp
+            'timestamp' => $this->timestamp,
+            'extras' => $this->extras
         ];
     }
 
     /**
      * Create from array
      *
-     * @param array{entry: string, labels: array<string, string>, timestamp: string} $data
+     * @param array{stream: array<string, string>, entry: string, timestamp: string, extras?: array<string, mixed>} $data
      */
     public static function fromArray(array $data): self
     {
         return new self(
             $data['stream'] ?? [],
             $data['entry'] ?? '',
-            $data['timestamp'] ?? (string)(time() * 1000000000)
+            $data['timestamp'] ?? (string)(time() * 1000000000),
+            $data['extras'] ?? []
         );
     }
 
