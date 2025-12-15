@@ -260,9 +260,11 @@ class LokiBufferedHandler extends AbstractProcessingHandler
 
             // Atomically get all items and clear the list
             // Using LRANGE to get all items, then DEL to remove the entire list
-            // This is simpler and atomic via pipeline
+            // Note: Pipeline is not a transaction, but the FLUSH_LOCK_KEY ensures only
+            // one flush operation runs at a time, preventing concurrent access
+            // Any logs added AFTER this pipeline completes go into a fresh list
             try {
-                // Use pipeline to atomically read and delete
+                // Use pipeline to batch read and delete operations
                 $results = Redis::pipeline(function ($pipe) {
                     // Get all current items
                     $pipe->lrange(self::BUFFER_KEY, 0, -1);
