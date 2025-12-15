@@ -343,6 +343,26 @@ composer install
 ./vendor/bin/phpunit
 ```
 
+Or use the composer script:
+
+```bash
+composer test
+```
+
+### Continuous Integration
+
+This project uses GitHub Actions for continuous integration. The test suite automatically runs on all pull requests against multiple PHP versions (8.1, 8.2, 8.3) and Laravel versions (10.x, 11.x).
+
+**Status checks are required to pass before merging pull requests.**
+
+The CI workflow:
+- Tests against all supported PHP and Laravel version combinations
+- Installs dependencies and runs the full PHPUnit test suite
+- Caches dependencies for faster builds
+- Runs automatically on every pull request and push to main branches
+
+You can view the workflow configuration in `.github/workflows/tests.yml`.
+
 ### Contributing
 
 Contributions are welcome! Please follow these guidelines:
@@ -352,6 +372,8 @@ Contributions are welcome! Please follow these guidelines:
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+**Note**: All pull requests must pass the automated test suite before they can be merged.
 
 ## License
 
