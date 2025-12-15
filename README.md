@@ -329,7 +329,7 @@ This library is designed to handle high-concurrency scenarios safely:
 
 ## Requirements
 
-- PHP 8.1 or higher
+- PHP 8.2 or higher
 - Laravel 10.x or 11.x
 - A running Grafana Loki instance
 - Laravel Queue configured (database, Redis, etc.)
