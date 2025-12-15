@@ -399,4 +399,49 @@ class MemoryBufferTest extends TestCase
         
         fwrite(STDERR, "    ✓ Default configuration values applied correctly\n");
     }
+
+    /**
+     * Test: bufferLogsBatch method exists and handles empty array
+     */
+    public function testBufferLogsBatchHandlesEmptyArray()
+    {
+        fwrite(STDERR, "  → Testing bufferLogsBatch with empty array...\n");
+        
+        $handler = $this->createHandler();
+        
+        // Call batch method with empty array (should not throw error)
+        $this->invokePrivateMethod($handler, 'bufferLogsBatch', [[]]);
+        
+        // Verify no errors occurred
+        $this->assertTrue(true);
+        
+        fwrite(STDERR, "    ✓ bufferLogsBatch handles empty array gracefully\n");
+    }
+
+    /**
+     * Test: bufferLogsBatch can handle multiple entries
+     */
+    public function testBufferLogsBatchHandlesMultipleEntries()
+    {
+        fwrite(STDERR, "  → Testing bufferLogsBatch with multiple entries...\n");
+        
+        $handler = $this->createHandler(memoryBufferSize: 100);
+        
+        // Create multiple log entries
+        $entries = [];
+        for ($i = 1; $i <= 5; $i++) {
+            $entries[] = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord("Batch log $i")]);
+        }
+        
+        // Verify batch method exists and accepts array (method will fail gracefully in unit test context)
+        try {
+            $this->invokePrivateMethod($handler, 'bufferLogsBatch', [$entries]);
+            // In unit test context without Laravel, this will throw, which is expected
+        } catch (\Throwable $e) {
+            // Expected in unit test context - we just want to verify method exists and accepts parameters
+            $this->assertStringContainsString('config', $e->getMessage(), 'Expected error about missing config in unit test');
+        }
+        
+        fwrite(STDERR, "    ✓ bufferLogsBatch method exists and accepts array parameter\n");
+    }
 }

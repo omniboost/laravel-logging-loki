@@ -145,12 +145,11 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->memoryBuffer = [];
         $this->memoryBufferLastFlush = microtime(true);
         
-        // Add each log to the cache buffer
+        // Add all logs to the cache buffer in a single batch operation
+        // This reduces lock contention by acquiring lock once instead of per log
         // Wrap in try-catch to prevent errors in destructor or shutdown
         try {
-            foreach ($logsToFlush as $logEntry) {
-                $this->bufferLog($logEntry);
-            }
+            $this->bufferLogsBatch($logsToFlush);
         } catch (\Throwable $e) {
             // Log error to PHP error log to aid debugging
             // We can't use Laravel Log here as it might cause recursion
@@ -226,6 +225,93 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // If we can't get the lock, just skip this log entry
             // This prevents blocking the application
             // Alternative: could log to a fallback channel
+        } finally {
+            optional($lock)->release();
+        }
+
+        // Trigger flush AFTER releasing the buffer lock to avoid holding multiple locks
+        if ($shouldFlush) {
+            $this->flush();
+        }
+    }
+
+    /**
+     * Buffer multiple log entries in a single batch operation
+     * This is more efficient than calling bufferLog() multiple times
+     * as it acquires the lock only once
+     * 
+     * @param array<LokiLogEntry> $logEntries
+     */
+    private function bufferLogsBatch(array $logEntries): void
+    {
+        if (empty($logEntries)) {
+            return;
+        }
+
+        // Use Redis atomic operations if available for better performance
+        if ($this->isRedisAvailable()) {
+            $this->bufferLogsBatchWithRedis($logEntries);
+            return;
+        }
+
+        $this->bufferLogsBatchWithLock($logEntries);
+    }
+
+    /**
+     * Buffer multiple logs using Redis atomic operations (fastest, no locks needed)
+     * 
+     * @param array<LokiLogEntry> $logEntries
+     */
+    private function bufferLogsBatchWithRedis(array $logEntries): void
+    {
+        // Use Redis pipeline to push all entries atomically
+        Redis::pipeline(function ($pipe) use ($logEntries) {
+            foreach ($logEntries as $logEntry) {
+                $pipe->rpush(self::BUFFER_KEY, json_encode($logEntry->toArray()));
+            }
+        });
+
+        // Get buffer size atomically
+        $bufferSize = Redis::llen(self::BUFFER_KEY);
+
+        // Check if we should flush
+        if ($this->shouldFlush($bufferSize)) {
+            $this->flush();
+        }
+    }
+
+    /**
+     * Buffer multiple logs using cache locks (fallback for non-Redis drivers)
+     * Acquires lock once and adds all entries in a single operation
+     * 
+     * @param array<LokiLogEntry> $logEntries
+     */
+    private function bufferLogsBatchWithLock(array $logEntries): void
+    {
+        // Use cache lock to prevent race conditions
+        $lock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
+        $shouldFlush = false;
+
+        try {
+            // Try to acquire lock with 5 second timeout
+            $lock->block(5, function () use ($logEntries, &$shouldFlush) {
+                // Get existing buffer
+                $buffer = Cache::get(self::BUFFER_KEY, []);
+                
+                // Add all log entries to buffer in one operation
+                foreach ($logEntries as $logEntry) {
+                    $buffer[] = $logEntry->toArray();
+                }
+                
+                // Write back to cache once
+                Cache::put(self::BUFFER_KEY, $buffer);
+
+                // Check if we should flush (but don't flush while holding the buffer lock)
+                $shouldFlush = $this->shouldFlush(count($buffer));
+            });
+        } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
+            // If we can't get the lock, log entries are lost
+            // This is a trade-off to prevent blocking the application
         } finally {
             optional($lock)->release();
         }
