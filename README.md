@@ -205,7 +205,7 @@ This library uses a two-tier buffering system for optimal performance:
 
 4. **Background Processing**: The job sends logs to Loki via HTTP in the background
 
-5. **Retries**: If sending fails, the job retries up to 3 times with a 10-second fixed delay
+5. **Retries**: If sending fails, the job retries up to 3 times with a 10-second fixed delay between attempts
 
 ### The SendLogsToLoki Job
 
@@ -287,10 +287,14 @@ Monitor the `SendLogsToLoki` jobs in your queue to ensure logs are being process
 
 **View all queued jobs:**
 ```bash
-# For database queue driver
-php artisan queue:monitor
+# For database queue driver - view pending jobs in database
+php artisan queue:work --verbose  # Shows jobs as they're processed
 
-# Or use Laravel Horizon (if installed)
+# Or query the jobs table directly
+php artisan tinker
+>>> DB::table('jobs')->count();
+
+# For Laravel Horizon users (Redis queue)
 php artisan horizon:list
 ```
 
@@ -310,8 +314,11 @@ php artisan queue:retry 5
 
 **View job statistics:**
 ```bash
-# For Laravel Horizon users
-php artisan horizon:stats
+# For Laravel Horizon users - check status and view dashboard
+php artisan horizon:status
+
+# Or visit the Horizon web dashboard at:
+# http://your-app.test/horizon
 ```
 
 **Debug job execution:**
