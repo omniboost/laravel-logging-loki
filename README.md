@@ -252,6 +252,89 @@ redirect_stderr=true
 stdout_logfile=/path/to/worker.log
 ```
 
+## Manual Buffer Flushing
+
+In addition to automatic flushing based on buffer size and time intervals, you can manually flush the buffer on a schedule using Laravel's task scheduler.
+
+### Scheduling Buffer Flushes
+
+The `FlushLokiBuffer` job can be scheduled to periodically flush the cache buffer to ensure logs are sent to Loki at predictable intervals. This is particularly useful for:
+
+- Deployments where you want guaranteed flush timing
+- Low-traffic applications where automatic thresholds may not be reached frequently
+- Ensuring logs are sent before scheduled maintenance windows
+
+Add the job to your `app/Console/Kernel.php` file:
+
+```php
+<?php
+
+namespace App\Console;
+
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
+use Omniboost\LaravelLoggingLoki\Jobs\FlushLokiBuffer;
+
+class Kernel extends ConsoleKernel
+{
+    protected function schedule(Schedule $schedule): void
+    {
+        // Flush Loki buffer every minute
+        $schedule->job(new FlushLokiBuffer())
+                 ->everyMinute()
+                 ->withoutOverlapping();
+    }
+}
+```
+
+### Scheduling Options
+
+Choose a schedule that fits your needs:
+
+```php
+// Every minute (recommended for most use cases)
+$schedule->job(new FlushLokiBuffer())->everyMinute()->withoutOverlapping();
+
+// Every 5 minutes (for low-traffic applications)
+$schedule->job(new FlushLokiBuffer())->everyFiveMinutes()->withoutOverlapping();
+
+// Every 30 seconds (for high-traffic or time-sensitive logging)
+$schedule->job(new FlushLokiBuffer())->everyThirtySeconds()->withoutOverlapping();
+
+// Only during business hours
+$schedule->job(new FlushLokiBuffer())
+         ->everyMinute()
+         ->between('9:00', '17:00')
+         ->withoutOverlapping();
+```
+
+### Important Notes
+
+- **Always use `withoutOverlapping()`**: This prevents concurrent flush attempts, which is critical for data integrity.
+- **Distributed Locking**: The job uses distributed locks internally to prevent concurrent flushes across multiple servers or processes.
+- **Independent of Automatic Flushing**: Scheduled flushing works alongside automatic buffer-based and time-based flushing. The job will only flush if there are logs in the buffer.
+- **No Queue Required**: The flush job runs synchronously in the scheduler context, but it dispatches the `SendLogsToLoki` job to your queue.
+
+### Manual Flush via Artisan
+
+You can also manually flush the buffer on-demand:
+
+```bash
+php artisan queue:work --once --queue=default
+```
+
+Or dispatch the job manually in your code:
+
+```php
+use Omniboost\LaravelLoggingLoki\Jobs\FlushLokiBuffer;
+
+// Dispatch the flush job to the queue
+FlushLokiBuffer::dispatch();
+
+// Or run it synchronously (not recommended in request cycle)
+FlushLokiBuffer::dispatchSync();
+```
+
 ## Viewing Logs in Grafana
 
 1. Open Grafana and navigate to Explore
