@@ -10,7 +10,7 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 - ✅ **Thread-Safe**: Race-condition protected buffer management ensures no log loss under concurrent access
 - ✅ **Reliable Persistence**: Shutdown handlers ensure logs are flushed on process termination
 - ✅ **Configurable**: Extensive configuration options for buffer sizes, intervals, labels, etc.
-- ✅ **Resilient**: Automatic retries on failure with exponential backoff
+- ✅ **Resilient**: Automatic retries on failure with fixed delay between attempts
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
 - ✅ **Debug Mode**: Optional debug logging for troubleshooting
 
@@ -205,7 +205,7 @@ This library uses a two-tier buffering system for optimal performance:
 
 4. **Background Processing**: The job sends logs to Loki via HTTP in the background
 
-5. **Retries**: If sending fails, the job retries up to 3 times with exponential backoff
+5. **Retries**: If sending fails, the job retries up to 3 times with a 10-second fixed delay
 
 ### The SendLogsToLoki Job
 
@@ -213,7 +213,7 @@ The `SendLogsToLoki` job is the core component that handles asynchronous log tra
 
 **Key Features:**
 - **Implements `ShouldQueue`**: Runs asynchronously in the background via Laravel's queue system
-- **Automatic Retries**: Configures 3 retry attempts with a 10-second exponential backoff between retries
+- **Automatic Retries**: Configures 3 retry attempts with a 10-second fixed delay between retries
 - **Batch Processing**: Groups multiple log entries by labels into Loki streams for efficient transmission
 - **Structured Metadata Support**: Automatically includes structured metadata (if present) as the third element in Loki's values array
 - **Error Handling**: Logs failures to your default Laravel log channel when debug mode is enabled
@@ -221,7 +221,7 @@ The `SendLogsToLoki` job is the core component that handles asynchronous log tra
 **Job Configuration:**
 ```php
 public int $tries = 3;        // Retry up to 3 times on failure
-public int $backoff = 10;     // Wait 10 seconds between retries (exponential)
+public int $backoff = 10;     // Wait 10 seconds between retries (fixed delay)
 ```
 
 **Queue Selection:**
@@ -392,7 +392,7 @@ LOKI_DEBUG=true
 ```
 
 The job's `failed()` method logs comprehensive error information including:
-- Error message and stack trace
+- Error message
 - Number of streams being sent
 - Total number of log entries
 - Loki URL
@@ -493,7 +493,7 @@ php artisan horizon
 │  │                                        │ │
 │  │  • Implements ShouldQueue             │ │
 │  │  • Retries: 3 attempts                │ │
-│  │  • Backoff: 10s exponential           │ │
+│  │  • Backoff: 10s fixed delay         │ │
 │  │  • Groups logs by labels into streams │ │
 │  │  • Formats for Loki Push API          │ │
 │  └────────┬───────────────────────────────┘ │
@@ -520,7 +520,7 @@ php artisan horizon
 3. **Cache buffer flushes** → Dispatches `SendLogsToLoki` job to queue
 4. **Queue worker picks up job** → Processes asynchronously in background
 5. **Job sends logs** → HTTP POST to Loki Push API via `LokiClient`
-6. **Retry on failure** → Up to 3 attempts with 10s exponential backoff
+6. **Retry on failure** → Up to 3 attempts with 10s fixed delay between retries
 
 ## Performance Considerations
 
