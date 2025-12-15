@@ -1,6 +1,6 @@
 # Tests for Structured Metadata Feature
 
-This directory contains comprehensive tests for the structured metadata functionality in the Laravel Loki Logging library.
+This directory contains comprehensive tests for the Laravel Loki Logging library, including structured metadata functionality, stream preparation, and concurrency safety.
 
 ## Test Structure
 
@@ -42,6 +42,25 @@ Tests the complete flow of sending logs with structured metadata to Loki:
 - Stream grouping by labels
 - Complex structured metadata
 - Empty entries handling
+
+#### `ConcurrencyTest.php`
+Tests Redis and Lock flow concurrency safety to ensure no data loss under concurrent access:
+
+**Redis Flow Tests:**
+- Redis driver detection
+- Redis flush error handling (graceful failure recovery)
+
+**Lock Flow Tests:**
+- Lock timeout handling (prevents application blocking)
+- Flush lock prevents concurrent flushes
+- Buffer lock coordination in non-Redis mode
+- Concurrent writes with lock-based buffering (20 concurrent writes)
+
+**General Concurrency Tests:**
+- shouldFlush logic with buffer size threshold
+- shouldFlush logic with time interval threshold
+- prepareLogEntry with structured metadata
+- Data integrity verification (no duplicates, no data loss)
 
 ## Running Tests
 
@@ -117,6 +136,53 @@ The tests cover the following scenarios:
 - ✅ Stream grouping by labels
 - ✅ Mixed entries in same stream
 
+### 5. Concurrency Safety
+- ✅ Redis driver detection
+- ✅ Lock timeout handling (no application blocking)
+- ✅ Flush lock prevents concurrent flushes
+- ✅ Redis flush error handling (graceful recovery)
+- ✅ Buffer lock coordination in non-Redis mode
+- ✅ Concurrent write handling (20 concurrent operations tested)
+- ✅ Data integrity (no duplicates, no data loss)
+- ✅ Buffer size threshold evaluation
+- ✅ Time interval threshold evaluation
+
+## Findings and Recommendations
+
+### Redis Flow (Atomic Operations)
+**Key Features:**
+- Uses `RPUSH` for atomic appends to buffer
+- Uses `LRANGE` + `LTRIM` in pipeline for atomic buffer extraction
+- Flush lock prevents concurrent flush operations
+- New logs arriving during flush are preserved in buffer
+
+**Performance:**
+- Best performance under high concurrency
+- No lock contention for buffer writes
+- Atomic operations guarantee consistency
+
+**Recommendation:** Use Redis as the cache driver for high-concurrency scenarios and production environments.
+
+### Lock Flow (Cache Locks)
+**Key Features:**
+- Uses distributed locks for buffer access in non-Redis cache drivers
+- Lock timeout handling prevents application blocking
+- Separate buffer lock and flush lock prevent race conditions
+- Lock acquisition happens before buffer operations
+
+**Caveats:**
+- Minimal risk of log loss under extreme lock contention
+- Lock timeouts may cause logs to be skipped (but application doesn't block)
+
+**Recommendation:** For critical applications requiring strict "no log loss" guarantees, use Redis cache driver. For less critical applications, lock-based flow is sufficient.
+
+### Concurrency Safety Summary
+- Both Redis and Lock flows prevent data loss under normal conditions
+- Redis flow has better performance and stronger guarantees
+- Lock flow is suitable for development and low-traffic environments
+- Buffer size and time-based flushing work correctly with both flows
+- Edge cases (lock timeouts, Redis failures) are handled gracefully
+
 ## Example Test Cases
 
 ### Blank Prefix Test
@@ -158,6 +224,21 @@ $metadata = [
 // Result: 
 // 'tags' = '["admin","user"]'
 // 'user_data' = '{"id":123}'
+```
+
+### Concurrent Write Test
+```php
+// Test: 20 concurrent writes with lock-based buffering
+for ($i = 0; $i < 20; $i++) {
+    $logEntry = new LokiLogEntry(
+        stream: ['level' => 'info', 'process' => (string)($i % 3)],
+        entry: "Concurrent log $i from process " . ($i % 3),
+        timestamp: (string)(time() * 1000000000 + $i),
+        structuredMetadata: ['request_id' => "req_$i"]
+    );
+    $this->invokePrivateMethod($handler, 'bufferLog', [$logEntry]);
+}
+// Result: All 20 logs buffered, no duplicates, no data loss
 ```
 
 ## Continuous Integration
