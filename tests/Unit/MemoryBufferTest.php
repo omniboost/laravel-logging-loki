@@ -11,7 +11,7 @@ use ReflectionProperty;
 
 /**
  * Unit Tests for In-Memory Buffer Feature
- * 
+ *
  * These tests verify the in-memory buffer layer that sits before the cache layer,
  * improving performance by reducing write operations to the caching system.
  */
@@ -84,13 +84,13 @@ class MemoryBufferTest extends TestCase
     public function testMemoryBufferInitializedEmpty()
     {
         fwrite(STDERR, "  → Testing memory buffer initialization...\n");
-        
+
         $handler = $this->createHandler();
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
-        
+
         $this->assertIsArray($buffer);
         $this->assertEmpty($buffer);
-        
+
         fwrite(STDERR, "    ✓ Memory buffer initialized as empty array\n");
     }
 
@@ -100,17 +100,17 @@ class MemoryBufferTest extends TestCase
     public function testLogsAddedToMemoryBuffer()
     {
         fwrite(STDERR, "  → Testing logs added to memory buffer...\n");
-        
+
         $handler = $this->createHandler(memoryBufferSize: 100); // Large size to prevent auto-flush
         $logEntry = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Test log 1')]);
-        
+
         // Manually add to memory buffer
         $this->invokePrivateMethod($handler, 'addToMemoryBuffer', [$logEntry]);
-        
+
         // Check memory buffer has the entry
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertCount(1, $buffer);
-        
+
         fwrite(STDERR, "    ✓ Log entry added to memory buffer\n");
     }
 
@@ -120,29 +120,29 @@ class MemoryBufferTest extends TestCase
     public function testMemoryBufferFlushesOnSizeThreshold()
     {
         fwrite(STDERR, "  → Testing memory buffer flush on size threshold...\n");
-        
+
         $handler = $this->createHandler(
             memoryBufferSize: 3,
             memoryFlushInterval: 999.0 // Large interval to test size-based flush only
         );
-        
+
         // Manually add entries to memory buffer without triggering cache operations
         $logEntry1 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 1')]);
         $logEntry2 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 2')]);
         $logEntry3 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 3')]);
-        
+
         $this->invokePrivateMethod($handler, 'addToMemoryBuffer', [$logEntry1]);
         $this->invokePrivateMethod($handler, 'addToMemoryBuffer', [$logEntry2]);
-        
+
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertCount(2, $buffer, 'Buffer should have 2 entries before threshold');
-        
+
         // Check that shouldFlush returns true when at threshold
         $buffer[] = $logEntry3;
         $this->setPrivateProperty($handler, 'memoryBuffer', $buffer);
         $shouldFlush = $this->invokePrivateMethod($handler, 'shouldFlushMemoryBuffer');
         $this->assertTrue($shouldFlush, 'Should flush when size threshold reached');
-        
+
         fwrite(STDERR, "    ✓ Memory buffer detects flush threshold correctly\n");
     }
 
@@ -152,25 +152,25 @@ class MemoryBufferTest extends TestCase
     public function testMemoryBufferFlushesOnTimeInterval()
     {
         fwrite(STDERR, "  → Testing memory buffer flush on time interval...\n");
-        
+
         $handler = $this->createHandler(
             memoryBufferSize: 100, // Large size to test time-based flush only
             memoryFlushInterval: 0.1 // 100ms interval
         );
-        
+
         // Manually add a log entry
         $logEntry = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 1')]);
         $buffer = [$logEntry];
         $this->setPrivateProperty($handler, 'memoryBuffer', $buffer);
-        
+
         // Set last flush time in the past
         $pastTime = microtime(true) - 0.2; // 200ms ago
         $this->setPrivateProperty($handler, 'memoryBufferLastFlush', $pastTime);
-        
+
         // Check should flush returns true
         $shouldFlush = $this->invokePrivateMethod($handler, 'shouldFlushMemoryBuffer');
         $this->assertTrue($shouldFlush, 'Should flush when time interval elapsed');
-        
+
         fwrite(STDERR, "    ✓ Memory buffer detects time-based flush correctly\n");
     }
 
@@ -180,20 +180,20 @@ class MemoryBufferTest extends TestCase
     public function testShouldNotFlushWhenBelowThreshold()
     {
         fwrite(STDERR, "  → Testing shouldFlushMemoryBuffer logic (below threshold)...\n");
-        
+
         $handler = $this->createHandler(
             memoryBufferSize: 5,
             memoryFlushInterval: 10.0
         );
-        
+
         // Manually add a few entries below threshold
         $logEntry1 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 1')]);
         $logEntry2 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 2')]);
         $this->setPrivateProperty($handler, 'memoryBuffer', [$logEntry1, $logEntry2]);
-        
+
         $shouldFlush = $this->invokePrivateMethod($handler, 'shouldFlushMemoryBuffer');
         $this->assertFalse($shouldFlush, 'Should not flush when below size and time threshold');
-        
+
         fwrite(STDERR, "    ✓ Does not flush when below both thresholds\n");
     }
 
@@ -203,20 +203,20 @@ class MemoryBufferTest extends TestCase
     public function testShouldFlushWhenSizeThresholdReached()
     {
         fwrite(STDERR, "  → Testing shouldFlushMemoryBuffer logic (size threshold)...\n");
-        
+
         $handler = $this->createHandler(
             memoryBufferSize: 2,
             memoryFlushInterval: 10.0
         );
-        
+
         // Manually add entries to reach threshold
         $logEntry1 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 1')]);
         $logEntry2 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 2')]);
         $this->setPrivateProperty($handler, 'memoryBuffer', [$logEntry1, $logEntry2]);
-        
+
         $shouldFlush = $this->invokePrivateMethod($handler, 'shouldFlushMemoryBuffer');
         $this->assertTrue($shouldFlush, 'Should flush when size threshold reached');
-        
+
         fwrite(STDERR, "    ✓ Flushes when size threshold reached\n");
     }
 
@@ -226,26 +226,26 @@ class MemoryBufferTest extends TestCase
     public function testFlushMemoryBufferClearsBuffer()
     {
         fwrite(STDERR, "  → Testing flushMemoryBuffer clears buffer...\n");
-        
+
         $handler = $this->createHandler(memoryBufferSize: 100);
-        
+
         // Manually add some entries
         $logEntry1 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 1')]);
         $logEntry2 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 2')]);
         $this->setPrivateProperty($handler, 'memoryBuffer', [$logEntry1, $logEntry2]);
-        
+
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertCount(2, $buffer);
-        
+
         // Note: We can't actually flush since it requires Laravel cache
         // But we can verify the buffer is cleared by setting it empty (simulating flush)
         $this->setPrivateProperty($handler, 'memoryBuffer', []);
         $this->setPrivateProperty($handler, 'memoryBufferLastFlush', microtime(true));
-        
+
         // Buffer should be empty
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertEmpty($buffer);
-        
+
         fwrite(STDERR, "    ✓ Memory buffer cleared after flush\n");
     }
 
@@ -255,20 +255,20 @@ class MemoryBufferTest extends TestCase
     public function testFlushMemoryBufferSkipsWhenEmpty()
     {
         fwrite(STDERR, "  → Testing flushMemoryBuffer with empty buffer...\n");
-        
+
         $handler = $this->createHandler();
-        
+
         // Ensure buffer is empty
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertEmpty($buffer);
-        
+
         // Flush should not cause any issues
         $this->invokePrivateMethod($handler, 'flushMemoryBuffer');
-        
+
         // Buffer should still be empty
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertEmpty($buffer);
-        
+
         fwrite(STDERR, "    ✓ Flush with empty buffer causes no issues\n");
     }
 
@@ -278,21 +278,21 @@ class MemoryBufferTest extends TestCase
     public function testCloseFlushesMemoryBuffer()
     {
         fwrite(STDERR, "  → Testing close() flushes memory buffer...\n");
-        
+
         $handler = $this->createHandler(memoryBufferSize: 100);
-        
+
         // Manually add entries
         $logEntry1 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 1')]);
         $logEntry2 = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord('Log 2')]);
         $this->setPrivateProperty($handler, 'memoryBuffer', [$logEntry1, $logEntry2]);
-        
+
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertCount(2, $buffer);
-        
+
         // Note: We can't actually test close() as it requires Laravel cache
         // But we verified the buffer has entries that should be flushed on close
         $this->assertNotEmpty($buffer, 'Buffer should have entries that would be flushed on close');
-        
+
         fwrite(STDERR, "    ✓ close() will flush memory buffer when called\n");
     }
 
@@ -302,12 +302,12 @@ class MemoryBufferTest extends TestCase
     public function testMemoryBufferSizeMinimumEnforced()
     {
         fwrite(STDERR, "  → Testing memory buffer size minimum enforcement...\n");
-        
+
         $handler = $this->createHandler(memoryBufferSize: 0); // Try to set 0
-        
+
         $size = $this->getPrivateProperty($handler, 'memoryBufferSize');
         $this->assertGreaterThanOrEqual(1, $size, 'Minimum size should be 1');
-        
+
         fwrite(STDERR, "    ✓ Memory buffer size minimum (1) enforced\n");
     }
 
@@ -317,15 +317,15 @@ class MemoryBufferTest extends TestCase
     public function testMemoryFlushIntervalMinimumEnforced()
     {
         fwrite(STDERR, "  → Testing memory flush interval minimum enforcement...\n");
-        
+
         $handler = $this->createHandler(
             memoryBufferSize: 10,
             memoryFlushInterval: 0.05 // Try to set very low
         );
-        
+
         $interval = $this->getPrivateProperty($handler, 'memoryFlushInterval');
         $this->assertGreaterThanOrEqual(0.1, $interval, 'Minimum interval should be 0.1');
-        
+
         fwrite(STDERR, "    ✓ Memory flush interval minimum (0.1) enforced\n");
     }
 
@@ -335,23 +335,23 @@ class MemoryBufferTest extends TestCase
     public function testMemoryBufferTracksLastFlushTime()
     {
         fwrite(STDERR, "  → Testing memory buffer last flush time tracking...\n");
-        
+
         $handler = $this->createHandler();
-        
+
         $initialTime = $this->getPrivateProperty($handler, 'memoryBufferLastFlush');
         $this->assertIsFloat($initialTime);
-        
+
         // Wait a bit to ensure time difference
         usleep(10000); // 10ms
-        
+
         // Set a new flush time
         $newTime = microtime(true);
         $this->setPrivateProperty($handler, 'memoryBufferLastFlush', $newTime);
-        
+
         $updatedTime = $this->getPrivateProperty($handler, 'memoryBufferLastFlush');
         $this->assertGreaterThanOrEqual($initialTime, $updatedTime, 'Last flush time should be updated or equal');
         $this->assertEquals($newTime, $updatedTime, 'Updated time should match set time');
-        
+
         fwrite(STDERR, "    ✓ Last flush time tracked correctly\n");
     }
 
@@ -361,20 +361,20 @@ class MemoryBufferTest extends TestCase
     public function testMultipleLogsBatchedInMemory()
     {
         fwrite(STDERR, "  → Testing multiple logs batched in memory...\n");
-        
+
         $handler = $this->createHandler(memoryBufferSize: 5);
-        
+
         // Manually add multiple logs below threshold
         $entries = [];
         for ($i = 1; $i <= 4; $i++) {
             $entries[] = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord("Log $i")]);
         }
         $this->setPrivateProperty($handler, 'memoryBuffer', $entries);
-        
+
         // All should be in memory
         $buffer = $this->getPrivateProperty($handler, 'memoryBuffer');
         $this->assertCount(4, $buffer, 'All 4 logs should be in memory buffer');
-        
+
         fwrite(STDERR, "    ✓ Multiple logs batched in memory before cache write\n");
     }
 
@@ -384,64 +384,64 @@ class MemoryBufferTest extends TestCase
     public function testMemoryBufferConfigurationDefaults()
     {
         fwrite(STDERR, "  → Testing memory buffer configuration defaults...\n");
-        
+
         // Create handler with default values
         $handler = new LokiBufferedHandler(
             url: 'http://localhost:3100',
             level: Level::Debug->value
         );
-        
+
         $memoryBufferSize = $this->getPrivateProperty($handler, 'memoryBufferSize');
         $memoryFlushInterval = $this->getPrivateProperty($handler, 'memoryFlushInterval');
-        
+
         $this->assertEquals(10, $memoryBufferSize, 'Default memory buffer size should be 10');
         $this->assertEquals(1.0, $memoryFlushInterval, 'Default memory flush interval should be 1.0');
-        
+
         fwrite(STDERR, "    ✓ Default configuration values applied correctly\n");
     }
 
     /**
-     * Test: bufferLogsBatch method exists and handles empty array
+     * Test: bufferLogs method exists and handles empty array
      */
-    public function testBufferLogsBatchHandlesEmptyArray()
+    public function testBufferLogsHandlesEmptyArray()
     {
-        fwrite(STDERR, "  → Testing bufferLogsBatch with empty array...\n");
-        
+        fwrite(STDERR, "  → Testing bufferLogs with empty array...\n");
+
         $handler = $this->createHandler();
-        
+
         // Call batch method with empty array (should not throw error)
-        $this->invokePrivateMethod($handler, 'bufferLogsBatch', [[]]);
-        
+        $this->invokePrivateMethod($handler, 'bufferLogs', [[]]);
+
         // Verify no errors occurred
         $this->assertTrue(true);
-        
-        fwrite(STDERR, "    ✓ bufferLogsBatch handles empty array gracefully\n");
+
+        fwrite(STDERR, "    ✓ bufferLogs handles empty array gracefully\n");
     }
 
     /**
-     * Test: bufferLogsBatch can handle multiple entries
+     * Test: bufferLogs can handle multiple entries
      */
-    public function testBufferLogsBatchHandlesMultipleEntries()
+    public function testBufferLogsHandlesMultipleEntries()
     {
-        fwrite(STDERR, "  → Testing bufferLogsBatch with multiple entries...\n");
-        
+        fwrite(STDERR, "  → Testing bufferLogs with multiple entries...\n");
+
         $handler = $this->createHandler(memoryBufferSize: 100);
-        
+
         // Create multiple log entries
         $entries = [];
         for ($i = 1; $i <= 5; $i++) {
             $entries[] = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord("Batch log $i")]);
         }
-        
+
         // Verify batch method exists and accepts array (method will fail gracefully in unit test context)
         try {
-            $this->invokePrivateMethod($handler, 'bufferLogsBatch', [$entries]);
+            $this->invokePrivateMethod($handler, 'bufferLogs', [$entries]);
             // In unit test context without Laravel, this will throw, which is expected
         } catch (\Throwable $e) {
             // Expected in unit test context - we just want to verify method exists and accepts parameters
             $this->assertStringContainsString('config', $e->getMessage(), 'Expected error about missing config in unit test');
         }
-        
-        fwrite(STDERR, "    ✓ bufferLogsBatch method exists and accepts array parameter\n");
+
+        fwrite(STDERR, "    ✓ bufferLogs method exists and accepts array parameter\n");
     }
 }

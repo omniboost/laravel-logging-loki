@@ -24,13 +24,13 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private ?string $password;
     private array $defaultLabels;
     private string $structuredMetadataPrefix;
-    
+
     // In-memory buffer properties
     private array $memoryBuffer = [];
     private int $memoryBufferSize;
     private float $memoryFlushInterval;
     private float $memoryBufferLastFlush;
-    
+
     // Static registry for shutdown handlers
     private static bool $shutdownRegistered = false;
     private static array $handlerInstances = [];
@@ -70,15 +70,15 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $this->password = $password;
         $this->defaultLabels = $defaultLabels;
         $this->structuredMetadataPrefix = $structuredMetadataPrefix;
-        
+
         // Initialize in-memory buffer settings
         $this->memoryBufferSize = max(1, $memoryBufferSize);
         $this->memoryFlushInterval = max(0.1, $memoryFlushInterval);
         $this->memoryBufferLastFlush = microtime(true);
-        
+
         // Register this instance for shutdown handling
         self::$handlerInstances[] = $this;
-        
+
         // Register shutdown function once per process to flush all handler instances
         if (!self::$shutdownRegistered) {
             register_shutdown_function(function () {
@@ -100,7 +100,7 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         $logEntry = $this->prepareLogEntry($record);
         $this->addToMemoryBuffer($logEntry);
     }
-    
+
     /**
      * Add log entry to in-memory buffer
      * Flushes to cache buffer when threshold is reached or interval elapsed
@@ -108,13 +108,13 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     private function addToMemoryBuffer(LokiLogEntry $logEntry): void
     {
         $this->memoryBuffer[] = $logEntry;
-        
+
         // Check if we should flush memory buffer to cache
         if ($this->shouldFlushMemoryBuffer()) {
             $this->flushMemoryBuffer();
         }
     }
-    
+
     /**
      * Check if memory buffer should be flushed to cache
      */
@@ -124,12 +124,12 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         if (count($this->memoryBuffer) >= $this->memoryBufferSize) {
             return true;
         }
-        
+
         // Flush if time interval elapsed
         $elapsed = microtime(true) - $this->memoryBufferLastFlush;
         return $elapsed >= $this->memoryFlushInterval;
     }
-    
+
     /**
      * Flush in-memory buffer to cache buffer
      * This moves logs from memory to the persistent cache layer
@@ -139,17 +139,17 @@ class LokiBufferedHandler extends AbstractProcessingHandler
         if (empty($this->memoryBuffer)) {
             return;
         }
-        
+
         // Get all buffered logs and clear memory buffer atomically
         $logsToFlush = $this->memoryBuffer;
         $this->memoryBuffer = [];
         $this->memoryBufferLastFlush = microtime(true);
-        
+
         // Add all logs to the cache buffer in a single batch operation
         // This reduces lock contention by acquiring lock once instead of per log
         // Wrap in try-catch to prevent errors in destructor or shutdown
         try {
-            $this->bufferLogsBatch($logsToFlush);
+            $this->bufferLogs($logsToFlush);
         } catch (\Throwable $e) {
             // Log error to PHP error log to aid debugging
             // We can't use Laravel Log here as it might cause recursion
@@ -163,20 +163,6 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * Buffer log entry with race-condition protection
-     */
-    protected function bufferLog(LokiLogEntry $logEntry): void
-    {
-        // Use Redis atomic operations if available for better performance
-        if ($this->isRedisAvailable()) {
-            $this->bufferLogWithRedis($logEntry);
-            return;
-        }
-
-        $this->bufferLogWithLock($logEntry);
-    }
-
-    /**
      * Check if Redis is available as cache driver
      */
     private function isRedisAvailable(): bool
@@ -185,12 +171,38 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * Buffer log using Redis atomic operations (fastest, no locks needed)
+     * Buffer log entry with race-condition protection
+     *
+     * @param array<LokiLogEntry> $logEntries
      */
-    private function bufferLogWithRedis(LokiLogEntry $logEntry): void
+    protected function bufferLogs(array $logEntries): void
     {
-        // Atomic append to list
-        Redis::rpush(self::BUFFER_KEY, json_encode($logEntry->toArray()));
+        if (empty($logEntries)) {
+            return;
+        }
+
+        // Use Redis atomic operations if available for better performance
+        if ($this->isRedisAvailable()) {
+            $this->bufferLogsWithRedis($logEntries);
+            return;
+        }
+
+        $this->bufferLogsWithLock($logEntries);
+    }
+
+    /**
+     * Buffer log using Redis atomic operations (fastest, no locks needed)
+     *
+     * @param array<LokiLogEntry> $logEntries
+     */
+    private function bufferLogsWithRedis(array $logEntries): void
+    {
+        // Use Redis pipeline to push all entries atomically
+        Redis::pipeline(function ($pipe) use ($logEntries) {
+            foreach ($logEntries as $logEntry) {
+                $pipe->rpush(self::BUFFER_KEY, json_encode($logEntry->toArray()));
+            }
+        });
 
         // Get buffer size atomically
         $bufferSize = Redis::llen(self::BUFFER_KEY);
@@ -203,90 +215,10 @@ class LokiBufferedHandler extends AbstractProcessingHandler
 
     /**
      * Buffer log using cache locks (fallback for non-Redis drivers)
-     */
-    private function bufferLogWithLock(LokiLogEntry $logEntry): void
-    {
-        // Use cache lock to prevent race conditions
-        $lock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
-        $shouldFlush = false;
-
-        try {
-            // Try to acquire lock with 5 second timeout
-            $lock->block(5, function () use ($logEntry, &$shouldFlush) {
-                // Add log entry to buffer
-                $buffer = Cache::get(self::BUFFER_KEY, []);
-                $buffer[] = $logEntry->toArray();
-                Cache::put(self::BUFFER_KEY, $buffer);
-
-                // Check if we should flush (but don't flush while holding the buffer lock)
-                $shouldFlush = $this->shouldFlush(count($buffer));
-            });
-        } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
-            // If we can't get the lock, just skip this log entry
-            // This prevents blocking the application
-            // Alternative: could log to a fallback channel
-        } finally {
-            optional($lock)->release();
-        }
-
-        // Trigger flush AFTER releasing the buffer lock to avoid holding multiple locks
-        if ($shouldFlush) {
-            $this->flush();
-        }
-    }
-
-    /**
-     * Buffer multiple log entries in a single batch operation
-     * This is more efficient than calling bufferLog() multiple times
-     * as it acquires the lock only once
-     * 
+     *
      * @param array<LokiLogEntry> $logEntries
      */
-    private function bufferLogsBatch(array $logEntries): void
-    {
-        if (empty($logEntries)) {
-            return;
-        }
-
-        // Use Redis atomic operations if available for better performance
-        if ($this->isRedisAvailable()) {
-            $this->bufferLogsBatchWithRedis($logEntries);
-            return;
-        }
-
-        $this->bufferLogsBatchWithLock($logEntries);
-    }
-
-    /**
-     * Buffer multiple logs using Redis atomic operations (fastest, no locks needed)
-     * 
-     * @param array<LokiLogEntry> $logEntries
-     */
-    private function bufferLogsBatchWithRedis(array $logEntries): void
-    {
-        // Use Redis pipeline to push all entries atomically
-        Redis::pipeline(function ($pipe) use ($logEntries) {
-            foreach ($logEntries as $logEntry) {
-                $pipe->rpush(self::BUFFER_KEY, json_encode($logEntry->toArray()));
-            }
-        });
-
-        // Get buffer size atomically
-        $bufferSize = Redis::llen(self::BUFFER_KEY);
-
-        // Check if we should flush
-        if ($this->shouldFlush($bufferSize)) {
-            $this->flush();
-        }
-    }
-
-    /**
-     * Buffer multiple logs using cache locks (fallback for non-Redis drivers)
-     * Acquires lock once and adds all entries in a single operation
-     * 
-     * @param array<LokiLogEntry> $logEntries
-     */
-    private function bufferLogsBatchWithLock(array $logEntries): void
+    private function bufferLogsWithLock(array $logEntries): void
     {
         // Use cache lock to prevent race conditions
         $lock = Cache::lock(self::BUFFER_LOCK_KEY, 5);
@@ -297,12 +229,12 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             $lock->block(5, function () use ($logEntries, &$shouldFlush) {
                 // Get existing buffer
                 $buffer = Cache::get(self::BUFFER_KEY, []);
-                
+
                 // Add all log entries to buffer in one operation
                 foreach ($logEntries as $logEntry) {
                     $buffer[] = $logEntry->toArray();
                 }
-                
+
                 // Write back to cache once
                 Cache::put(self::BUFFER_KEY, $buffer);
 
@@ -310,8 +242,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
                 $shouldFlush = $this->shouldFlush(count($buffer));
             });
         } catch (\Illuminate\Contracts\Cache\LockTimeoutException $e) {
-            // If we can't get the lock, log entries are lost
-            // This is a trade-off to prevent blocking the application
+            // If we can't get the lock, just skip this log entry
+            // This prevents blocking the application
+            // Alternative: could log to a fallback channel
         } finally {
             optional($lock)->release();
         }
