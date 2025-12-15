@@ -8,7 +8,7 @@ use Mockery;
 use Monolog\Level;
 use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
-use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedHandler;
+use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
 use Orchestra\Testbench\TestCase;
 use ReflectionClass;
 
@@ -77,14 +77,12 @@ class ConcurrencyTest extends TestCase
     {
         return new LokiBufferedHandler(
             url: $url,
-            level: Level::Debug->value,
             bufferSize: $bufferSize,
             flushInterval: 5.0,
             defaultLabels: ['app' => 'test'],
             username: null,
             password: null,
             structuredMetadataPrefix: '',
-            bubble: true
         );
     }
 

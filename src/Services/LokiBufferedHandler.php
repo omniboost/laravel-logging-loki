@@ -1,16 +1,14 @@
 <?php
 
-namespace Omniboost\LaravelLoggingLoki\Logging;
+namespace Omniboost\LaravelLoggingLoki\Services;
 
-use Monolog\Handler\AbstractProcessingHandler;
 use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\Jobs\SendLogsToLoki;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
-use Illuminate\Support\Facades\Log;
 
-class LokiBufferedHandler extends AbstractProcessingHandler
+class LokiBufferedHandler
 {
     private const BUFFER_KEY = 'loki:log:buffer';
     private const BUFFER_LOCK_KEY = 'loki:log:buffer:lock';
@@ -50,19 +48,15 @@ class LokiBufferedHandler extends AbstractProcessingHandler
      */
     public function __construct(
         string $url,
-        int $level = \Monolog\Level::Debug->value,
         int $bufferSize = 100,
         float $flushInterval = 5.0,
         array $defaultLabels = [],
         ?string $username = null,
         ?string $password = null,
         string $structuredMetadataPrefix = '',
-        bool $bubble = true,
         int $memoryBufferSize = 100,
         float $memoryFlushInterval = 1.0
     ) {
-        parent::__construct($level, $bubble);
-
         $this->url = $url;
         $this->bufferSize = $bufferSize;
         $this->flushInterval = $flushInterval;
@@ -103,9 +97,9 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * {@inheritdoc}
+     * Write logs into the buffered handler.
      */
-    protected function write(LogRecord $record): void
+    public function write(LogRecord $record): void
     {
         $logEntry = $this->prepareLogEntry($record);
         $this->addToMemoryBuffer($logEntry);
@@ -142,9 +136,24 @@ class LokiBufferedHandler extends AbstractProcessingHandler
 
     /**
      * Flush in-memory buffer to cache buffer
-     * This moves logs from memory to the persistent cache layer
+     *
+     * This method moves logs from the in-memory buffer to the persistent cache layer.
+     * It is called automatically when:
+     * - Memory buffer size threshold is reached
+     * - Memory flush interval has elapsed
+     * - Process shutdown (via register_shutdown_function)
+     * - Handler destructor is called
+     *
+     * The method is also exposed publicly to allow manual flushing via:
+     * - LokiFlushCommand (artisan omniboost:loki:flush)
+     * - Programmatic calls in application code
+     *
+     * Thread-safe: Uses atomic operations (Redis) or locks (other cache drivers)
+     * to prevent race conditions during concurrent access.
+     *
+     * @return void
      */
-    private function flushMemoryBuffer(): void
+    public function flushMemoryBuffer(): void
     {
         if (empty($this->memoryBuffer)) {
             return;
@@ -433,8 +442,30 @@ class LokiBufferedHandler extends AbstractProcessingHandler
     }
 
     /**
-     * Flush buffered logs to the job queue
-     * Public method to allow manual flushing
+     * Flush buffered logs from cache to the job queue
+     *
+     * This method extracts all buffered logs from the cache layer and dispatches
+     * them to the SendLogsToLoki job for asynchronous processing.
+     *
+     * The flush operation is triggered when:
+     * - Cache buffer size threshold is reached
+     * - Cache flush interval has elapsed
+     * - Manual flush is requested (via LokiFlushCommand or programmatic call)
+     *
+     * Thread-safety:
+     * - Uses Redis atomic operations (LRANGE + LTRIM) when Redis is the cache driver
+     * - Uses distributed locks for non-Redis cache drivers
+     * - Prevents double-flushing via FLUSH_LOCK_KEY
+     * - Ensures no log loss during concurrent access
+     *
+     * Process:
+     * 1. Acquires flush lock to prevent concurrent flush operations
+     * 2. Atomically reads and clears the cache buffer
+     * 3. Decodes buffer entries to LokiLogEntry objects
+     * 4. Dispatches SendLogsToLoki job with the entries
+     * 5. Releases lock
+     *
+     * @return void
      */
     public function flush(): void
     {
@@ -572,23 +603,5 @@ class LokiBufferedHandler extends AbstractProcessingHandler
             // Always release the flush lock
             $flushLock->release();
         }
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function close(): void
-    {
-        $this->flushMemoryBuffer();
-        $this->flush();
-        parent::close();
-    }
-
-    /**
-     * Destructor - ensure memory buffer is flushed
-     */
-    public function __destruct()
-    {
-        $this->flushMemoryBuffer();
     }
 }
