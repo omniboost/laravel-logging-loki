@@ -5,8 +5,9 @@ namespace Omniboost\LaravelLoggingLoki\Tests\Unit;
 use Monolog\Level;
 use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
+use Omniboost\LaravelLoggingLoki\LokiServiceProvider;
 
-use PHPUnit\Framework\TestCase;
+use Orchestra\Testbench\TestCase;
 use ReflectionClass;
 use ReflectionProperty;
 
@@ -22,6 +23,51 @@ class MemoryBufferTest extends TestCase
     {
         parent::setUp();
         fwrite(STDERR, "\n");
+    }
+
+    protected function tearDown(): void
+    {
+        // Manually flush all handler instances while Laravel container is still available
+        // This prevents shutdown handler from running after Laravel is torn down
+        $reflection = new ReflectionClass(LokiBufferedHandler::class);
+        $instancesProperty = $reflection->getProperty('handlerInstances');
+        $instancesProperty->setAccessible(true);
+        $instances = $instancesProperty->getValue();
+        
+        foreach ($instances as $handler) {
+            if ($handler instanceof LokiBufferedHandler) {
+                try {
+                    $handler->flushMemoryBuffer();
+                } catch (\Throwable $e) {
+                    // Ignore flush errors during teardown - handler might try to send logs to Loki
+                }
+            }
+        }
+        
+        // Clear the instances array to prevent shutdown handler from running
+        $instancesProperty->setValue(null, []);
+        
+        parent::tearDown();
+    }
+
+    /**
+     * Get package providers
+     */
+    protected function getPackageProviders($app): array
+    {
+        return [LokiServiceProvider::class];
+    }
+
+    /**
+     * Configure environment for testing
+     */
+    protected function getEnvironmentSetUp($app): void
+    {
+        $app['config']->set('cache.default', 'array');
+        $app['config']->set('queue.default', 'sync');
+        $app['config']->set('loki.url', 'http://localhost:3100');
+        $app['config']->set('loki.queue', 'sync');
+        $app['config']->set('loki.debug', false);
     }
 
     private function getPrivateProperty($object, string $propertyName)
@@ -431,14 +477,19 @@ class MemoryBufferTest extends TestCase
             $entries[] = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$this->createLogRecord("Batch log $i")]);
         }
 
-        // Verify batch method exists and accepts array (method will fail gracefully in unit test context)
+        // Verify batch method exists and accepts array - should work now with Laravel properly configured
+        // The method may trigger a job dispatch which could fail, but that's OK for this unit test
         try {
             $this->invokePrivateMethod($handler, 'bufferLogs', [$entries]);
-            // In unit test context without Laravel, this will throw, which is expected
-        } catch (\Throwable $e) {
-            // Expected in unit test context - we just want to verify method exists and accepts parameters
-            $this->assertStringContainsString('config', $e->getMessage(), 'Expected error about missing config in unit test');
+        } catch (\RuntimeException $e) {
+            // Expected - job may try to send to Loki which will fail in test environment
+            if (!str_contains($e->getMessage(), 'Failed to send logs to Loki')) {
+                throw $e; // Re-throw if it's a different error
+            }
         }
+        
+        // Verify it completed without throwing an unexpected exception
+        $this->assertTrue(true, 'bufferLogs successfully handled multiple entries');
 
         fwrite(STDERR, "    ✓ bufferLogs method exists and accepts array parameter\n");
     }
