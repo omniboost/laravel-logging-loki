@@ -367,7 +367,7 @@ class LokiBufferedHandler
      * Extract structured metadata from context based on prefix configuration
      *
      * @param array $context Log context array
-     * @return array<string, string>
+     * @return array<string, string|array> Structured metadata with string values or nested arrays
      */
     private function extractStructuredMetadata(array $context): array
     {
@@ -447,9 +447,14 @@ class LokiBufferedHandler
                 $result = [];
                 foreach ($value as $k => $v) {
                     $compVal = $this->toLokiCompatible($v);
-                    // Include if: compatible value OR original value was explicitly null
-                    // Skip if: incompatible (like indexed array) where compVal is null but original wasn't
-                    if (!($compVal === null && $v !== null)) {
+                    
+                    // Include the value if:
+                    // 1. It's Loki-compatible (compVal is not null), OR
+                    // 2. The original value was explicitly null (we want to preserve null keys)
+                    // Skip if compVal is null AND original value was not null (incompatible value like indexed array)
+                    $shouldInclude = $compVal !== null || $v === null;
+                    
+                    if ($shouldInclude) {
                         $result[$k] = $compVal;
                     }
                 }
