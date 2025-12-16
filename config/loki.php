@@ -129,15 +129,19 @@ return [
     |--------------------------------------------------------------------------
     |
     | Configure a prefix for extracting labels from log context.
-    | If left empty (default), only the 'labels' key in context is used.
-    | If set, context fields starting with this prefix will be extracted
-    | and included as labels in the Loki stream (with prefix removed).
+    | Default is 'label_' to provide clear separation from structured metadata.
+    | Context fields starting with this prefix will be extracted and included
+    | as labels in the Loki stream (with prefix removed).
     |
-    | Example: Setting 'label_' means context fields like 'label_user_id'
-    | and 'label_request_id' will be included as labels, while others won't.
+    | Example: With default 'label_', fields like 'label_user_id' and
+    | 'label_request_id' will be included as labels, while others won't.
+    |
+    | Set to empty string ('') to use the traditional 'labels' key approach.
     |
     | Note: Labels with null or empty values are automatically excluded.
+    | Important: Use a different prefix than structured_metadata_prefix to
+    | avoid fields being added as both labels and structured metadata.
     |
     */
-    'labels_prefix' => env('LOKI_LABELS_PREFIX', ''),
+    'labels_prefix' => env('LOKI_LABELS_PREFIX', 'label_'),
 ];

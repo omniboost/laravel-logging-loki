@@ -106,7 +106,7 @@ class LabelPrefixingTest extends TestCase
     }
 
     /**
-     * Test: Extract labels when prefix is blank (default mode)
+     * Test: Extract labels when prefix is blank (traditional mode)
      *
      * When the prefix is empty, ONLY the 'labels' key in context should be used
      * for extracting labels (traditional behavior).
