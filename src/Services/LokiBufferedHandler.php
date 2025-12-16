@@ -367,7 +367,7 @@ class LokiBufferedHandler
      * Extract structured metadata from context based on prefix configuration
      *
      * @param array $context Log context array
-     * @return array<string, string>
+     * @return array<string, string|array> Structured metadata with string values or nested arrays
      */
     private function extractStructuredMetadata(array $context): array
     {
@@ -408,41 +408,150 @@ class LokiBufferedHandler
     }
 
     /**
+     * Convert a value to Loki-compatible format
+     * 
+     * Loki structured metadata requirements:
+     * - Primitives (scalar values, null) are allowed
+     * - Associative arrays (key-value pairs) are treated as objects
+     * - Objects can contain only primitives or nested objects recursively
+     * - Indexed/list arrays are not allowed and will be skipped
+     *
+     * @param mixed $value The value to convert
+     * @return mixed Loki-compatible value or null if not compatible
+     */
+    private function toLokiCompatible($value)
+    {
+        // Primitives: return as-is
+        if (is_scalar($value) || is_null($value)) {
+            return $value;
+        }
+
+        // Objects: cast to array and process
+        if (is_object($value)) {
+            $value = (array)$value;
+        }
+
+        // Arrays: distinguish between associative (objects) and indexed (lists)
+        if (is_array($value)) {
+            // Empty arrays are treated as indexed (not compatible)
+            if (empty($value)) {
+                return null;
+            }
+
+            // Check if array is associative (has string keys or non-sequential numeric keys)
+            $keys = array_keys($value);
+            $isAssociative = $keys !== range(0, count($value) - 1);
+
+            if ($isAssociative) {
+                // Associative array: recursively process each value
+                $result = [];
+                foreach ($value as $k => $v) {
+                    $compVal = $this->toLokiCompatible($v);
+                    
+                    // Include the value if:
+                    // 1. It's Loki-compatible (compVal is not null), OR
+                    // 2. The original value was explicitly null (we want to preserve null keys)
+                    // Skip if compVal is null AND original value was not null (incompatible value like indexed array)
+                    $shouldInclude = $compVal !== null || $v === null;
+                    
+                    if ($shouldInclude) {
+                        $result[$k] = $compVal;
+                    }
+                }
+                return $result;
+            } else {
+                // Indexed array: not allowed in Loki structured metadata
+                // Return null to indicate this value should be skipped
+                return null;
+            }
+        }
+
+        // Unknown type: skip
+        return null;
+    }
+
+    /**
      * Sanitize structured metadata to comply with Loki requirements
-     * - Only string values (no null, objects, or arrays)
-     * - Converts scalars to strings
-     * - JSON encodes complex types
+     * - Converts values to Loki-compatible format
+     * - Recursively handles nested objects/associative arrays
+     * - Skips indexed arrays (lists)
+     * - Converts primitives to strings for final output
      *
      * @param array $metadata
-     * @return array<string, string>
+     * @return array<string, string|array>
      */
     private function sanitizeStructuredMetadata(array $metadata): array
     {
         $sanitized = [];
 
         foreach ($metadata as $key => $value) {
-            // Skip null values - Loki doesn't accept them
-            if ($value === null) {
+            // Convert to Loki-compatible format
+            $compatible = $this->toLokiCompatible($value);
+
+            // Skip null values - either incompatible (indexed arrays) or explicitly null
+            // Loki doesn't accept null values in structured metadata
+            if ($compatible === null) {
                 continue;
             }
 
-            // JSON encode arrays and objects - Loki only accepts flat key-value pairs
-            if (is_array($value) || is_object($value)) {
-                $sanitized[$key] = json_encode($value);
+            // Convert booleans to string representation
+            if (is_bool($compatible)) {
+                $sanitized[$key] = $compatible ? 'true' : 'false';
+                continue;
+            }
+
+            // If it's an array (associative), recursively sanitize it
+            if (is_array($compatible)) {
+                $sanitizedArray = $this->sanitizeStructuredMetadataRecursive($compatible);
+                if (!empty($sanitizedArray)) {
+                    $sanitized[$key] = $sanitizedArray;
+                }
+                continue;
+            }
+
+            // Convert scalar values to strings
+            $sanitized[$key] = (string) $compatible;
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Recursively sanitize nested arrays/objects to strings
+     *
+     * @param array $data
+     * @return array<string, string|array>
+     */
+    private function sanitizeStructuredMetadataRecursive(array $data): array
+    {
+        $result = [];
+
+        foreach ($data as $key => $value) {
+            // Skip null values
+            if ($value === null) {
                 continue;
             }
 
             // Convert boolean to string
             if (is_bool($value)) {
-                $sanitized[$key] = $value ? 'true' : 'false';
+                $result[$key] = $value ? 'true' : 'false';
                 continue;
             }
 
-            // Convert scalar values to strings
-            $sanitized[$key] = (string) $value;
+            // Recursively process nested arrays
+            if (is_array($value)) {
+                $nested = $this->sanitizeStructuredMetadataRecursive($value);
+                if (!empty($nested)) {
+                    $result[$key] = $nested;
+                }
+                continue;
+            }
+
+            // Convert scalar to string
+            $result[$key] = (string) $value;
         }
 
-        return $sanitized;
+        return $result;
     }
 
     /**
