@@ -9,6 +9,7 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 - ✅ **Automatic Flushing**: Flushes based on buffer size or time interval (both layers)
 - ✅ **Thread-Safe**: Race-condition protected buffer management ensures no log loss under concurrent access
 - ✅ **Reliable Persistence**: Shutdown handlers ensure logs are flushed on process termination
+- ✅ **GZIP Compression**: Reduces payload size to send more data per request
 - ✅ **Configurable**: Extensive configuration options for buffer sizes, intervals, labels, etc.
 - ✅ **Resilient**: Automatic retries on failure with exponential backoff
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
@@ -41,6 +42,7 @@ LOKI_FLUSH_INTERVAL=5.0
 LOKI_QUEUE=default
 LOKI_LOG_LEVEL=debug
 LOKI_DEBUG=false
+LOKI_GZIP_COMPRESSION=true
 LOKI_STRUCTURED_METADATA_PREFIX=
 ```
 
@@ -64,6 +66,7 @@ Add the Loki channel to your `config/logging.php`:
         'flush_interval' => env('LOKI_FLUSH_INTERVAL', 5.0),
         'username' => env('LOKI_USERNAME'),
         'password' => env('LOKI_PASSWORD'),
+        'gzip_compression' => env('LOKI_GZIP_COMPRESSION', true),
         'structured_metadata_prefix' => env('LOKI_STRUCTURED_METADATA_PREFIX', ''),
         'labels' => [
             'app' => env('APP_NAME', 'laravel'),
@@ -165,6 +168,50 @@ Log::info('Payment processed', [
 - Business context: `meta_order_id`, `meta_transaction_id`
 - Performance metrics: `meta_duration_ms`, `meta_memory_mb`
 
+### GZIP Compression
+
+This library supports GZIP compression for data sent to Grafana Loki, which significantly reduces payload size and allows more data to be sent per request. This helps maximize usage of Grafana's request size limits.
+
+#### Benefits
+
+- **Reduced Payload Size**: GZIP compression typically reduces JSON payloads by 80-95%
+- **More Data Per Request**: Send more log entries within Grafana's size limits
+- **Reduced Network Overhead**: Smaller payloads mean faster transmission
+- **Lower Bandwidth Costs**: Especially beneficial for high-volume logging
+
+#### Configuration
+
+GZIP compression is **enabled by default**. You can control it via configuration:
+
+```env
+# Enable compression (default)
+LOKI_GZIP_COMPRESSION=true
+
+# Disable compression if needed
+LOKI_GZIP_COMPRESSION=false
+```
+
+Or in your `config/logging.php`:
+
+```php
+'loki' => [
+    'driver' => 'loki',
+    'url' => env('LOKI_URL'),
+    'gzip_compression' => env('LOKI_GZIP_COMPRESSION', true),
+    // ... other options
+],
+```
+
+#### When to Disable Compression
+
+You might want to disable GZIP compression in these scenarios:
+
+- **Debugging**: To inspect raw payloads in network monitoring tools
+- **Compatibility**: If using a proxy or gateway that doesn't support gzip encoding
+- **Very Small Payloads**: Compression overhead might not be worth it for tiny log volumes (rare)
+
+**Note**: Most Grafana Loki instances support and recommend GZIP compression. The library automatically sets the appropriate `Content-Encoding: gzip` header when compression is enabled.
+
 ### Channel-specific Logging
 
 Log only to Loki:
@@ -221,6 +268,7 @@ This library uses a two-tier buffering system for optimal performance:
 | `url` | Loki server URL | `http://localhost:3100` |
 | `username` | Basic auth username (optional) | `null` |
 | `password` | Basic auth password (optional) | `null` |
+| `gzip_compression` | Enable GZIP compression for data sent to Loki | `true` |
 | `memory_buffer_size` | Logs to buffer in memory before cache write | `10` |
 | `memory_flush_interval` | Seconds before flushing memory buffer | `1.0` |
 | `buffer_size` | Logs to buffer in cache before queue dispatch | `100` |

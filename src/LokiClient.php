@@ -13,12 +13,14 @@ class LokiClient
     private string $url;
     private ?string $username;
     private ?string $password;
+    private bool $gzipCompression;
 
-    public function __construct(string $url, ?string $username = null, ?string $password = null)
+    public function __construct(string $url, ?string $username = null, ?string $password = null, bool $gzipCompression = true)
     {
         $this->url = rtrim($url, '/');
         $this->username = $username;
         $this->password = $password;
+        $this->gzipCompression = $gzipCompression;
 
         $this->httpClient = new Client([
             'timeout' => 5,
@@ -43,12 +45,32 @@ class LokiClient
         ];
 
         try {
+            // Encode payload to JSON
+            $jsonPayload = json_encode($payload);
+            
+            if ($jsonPayload === false) {
+                throw new \RuntimeException('Failed to encode payload to JSON');
+            }
+
             $options = [
-                'json' => $payload,
                 'headers' => [
                     'Content-Type' => 'application/json',
                 ],
             ];
+
+            // Apply GZIP compression if enabled
+            if ($this->gzipCompression) {
+                $compressedPayload = gzencode($jsonPayload);
+                
+                if ($compressedPayload === false) {
+                    throw new \RuntimeException('Failed to compress payload');
+                }
+                
+                $options['body'] = $compressedPayload;
+                $options['headers']['Content-Encoding'] = 'gzip';
+            } else {
+                $options['body'] = $jsonPayload;
+            }
 
             // Add basic auth if credentials are provided
             if ($this->username && $this->password) {
