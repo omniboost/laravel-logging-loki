@@ -513,7 +513,7 @@ class LokiBufferedHandler
                 continue;
             }
 
-            // JSON encode arrays and objects - Loki only accepts flat key-value pairs
+            // JSON encode arrays and objects - Loki labels only accept string values
             if (is_array($value) || is_object($value)) {
                 $sanitized[$key] = json_encode($value);
                 continue;
