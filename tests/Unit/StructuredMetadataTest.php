@@ -309,13 +309,14 @@ class StructuredMetadataTest extends TestCase
     }
 
     /**
-     * Test: Sanitization - Arrays are JSON encoded
+     * Test: Sanitization - Indexed arrays are skipped
      *
-     * Loki only accepts string values, so arrays must be JSON encoded.
+     * Loki doesn't accept indexed/list arrays in structured metadata.
+     * These should be filtered out.
      */
     public function testSanitizeStructuredMetadataHandlesArrays()
     {
-        fwrite(STDERR, "  → Testing array handling (JSON encoding)...\n");
+        fwrite(STDERR, "  → Testing indexed array handling (skipped)...\n");
 
         $handler = $this->createHandler('');
         $metadata = [
@@ -327,22 +328,21 @@ class StructuredMetadataTest extends TestCase
 
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
-        $this->assertArrayHasKey('tags', $result);
+        // Indexed array 'tags' should be skipped
+        $this->assertArrayNotHasKey('tags', $result);
         $this->assertEquals('123', $result['user_id']);
-        $this->assertIsString($result['tags']);
-        $this->assertEquals('["tag1","tag2","tag3"]', $result['tags']);
 
-        fwrite(STDERR, "    ✓ Arrays JSON encoded to strings\n");
+        fwrite(STDERR, "    ✓ Indexed arrays skipped\n");
     }
 
     /**
-     * Test: Sanitization - Objects are JSON encoded
+     * Test: Sanitization - Objects are expanded as nested arrays
      *
-     * Like arrays, objects must be converted to JSON strings for Loki.
+     * Objects should be converted to associative arrays and expanded recursively.
      */
     public function testSanitizeStructuredMetadataHandlesObjects()
     {
-        fwrite(STDERR, "  → Testing object handling (JSON encoding)...\n");
+        fwrite(STDERR, "  → Testing object handling (expanded)...\n");
 
         $handler = $this->createHandler('');
         $metadata = [
@@ -355,10 +355,14 @@ class StructuredMetadataTest extends TestCase
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
         $this->assertArrayHasKey('user_data', $result);
-        $this->assertIsString($result['user_data']);
-        $this->assertJson($result['user_data']);
+        // Object should be expanded as nested array, not JSON string
+        $this->assertIsArray($result['user_data']);
+        $this->assertArrayHasKey('id', $result['user_data']);
+        $this->assertArrayHasKey('name', $result['user_data']);
+        $this->assertEquals('456', $result['user_data']['id']);
+        $this->assertEquals('John', $result['user_data']['name']);
 
-        fwrite(STDERR, "    ✓ Objects JSON encoded to strings\n");
+        fwrite(STDERR, "    ✓ Objects expanded as nested arrays\n");
     }
 
     /**
@@ -430,8 +434,8 @@ class StructuredMetadataTest extends TestCase
             'user_id' => 123,
             'name' => 'John Doe',
             'is_active' => true,
-            'tags' => ['admin', 'developer'],
-            'metadata' => ['key' => 'value'],
+            'tags' => ['admin', 'developer'],  // indexed array - will be skipped
+            'metadata' => ['key' => 'value'],  // associative array - will be expanded
             'optional' => null,
             'score' => 95.5,
         ];
@@ -439,19 +443,25 @@ class StructuredMetadataTest extends TestCase
         $result = $this->invokePrivateMethod($handler, 'sanitizeStructuredMetadata', [$metadata]);
 
         $this->assertIsArray($result);
-        $this->assertCount(6, $result); // null value excluded
+        $this->assertCount(5, $result); // null excluded, indexed array (tags) excluded
         $this->assertArrayHasKey('user_id', $result);
         $this->assertArrayHasKey('name', $result);
         $this->assertArrayHasKey('is_active', $result);
-        $this->assertArrayHasKey('tags', $result);
+        $this->assertArrayNotHasKey('tags', $result); // indexed array should be excluded
         $this->assertArrayHasKey('metadata', $result);
         $this->assertArrayHasKey('score', $result);
         $this->assertArrayNotHasKey('optional', $result);
 
-        // All values should be strings
-        foreach ($result as $value) {
-            $this->assertIsString($value);
-        }
+        // Scalar values should be strings
+        $this->assertIsString($result['user_id']);
+        $this->assertIsString($result['name']);
+        $this->assertIsString($result['is_active']);
+        $this->assertIsString($result['score']);
+        
+        // Associative array should be expanded, not JSON-encoded
+        $this->assertIsArray($result['metadata']);
+        $this->assertArrayHasKey('key', $result['metadata']);
+        $this->assertEquals('value', $result['metadata']['key']);
 
         fwrite(STDERR, "    ✓ Complex scenario: all types sanitized correctly\n");
     }
@@ -534,5 +544,218 @@ class StructuredMetadataTest extends TestCase
         $this->assertEmpty($result->structuredMetadata);
 
         fwrite(STDERR, "    ✓ Log entry prepared with empty structured metadata\n");
+    }
+
+    /**
+     * Test: Nested associative arrays are expanded recursively
+     *
+     * Deeply nested objects/associative arrays should be handled correctly.
+     */
+    public function testSanitizeStructuredMetadataHandlesNestedAssociativeArrays()
+    {
+        fwrite(STDERR, "  → Testing nested associative arrays...\n");
+
+        $handler = $this->createHandler('');
+        $metadata = [
+            'user' => [
+                'id' => 123,
+                'profile' => [
+                    'name' => 'John Doe',
+                    'age' => 30,
+                    'active' => true,
+                ],
+            ],
+        ];
+
+        $result = $this->invokePrivateMethod($handler, 'sanitizeStructuredMetadata', [$metadata]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('user', $result);
+        $this->assertIsArray($result['user']);
+        $this->assertArrayHasKey('id', $result['user']);
+        $this->assertArrayHasKey('profile', $result['user']);
+        $this->assertIsArray($result['user']['profile']);
+        $this->assertEquals('123', $result['user']['id']);
+        $this->assertEquals('John Doe', $result['user']['profile']['name']);
+        $this->assertEquals('30', $result['user']['profile']['age']);
+        $this->assertEquals('true', $result['user']['profile']['active']);
+
+        fwrite(STDERR, "    ✓ Nested associative arrays expanded correctly\n");
+    }
+
+    /**
+     * Test: Mixed associative and indexed arrays
+     *
+     * When an associative array contains indexed arrays, the indexed arrays
+     * should be skipped while keeping the rest of the structure.
+     */
+    public function testSanitizeStructuredMetadataHandlesMixedArrayTypes()
+    {
+        fwrite(STDERR, "  → Testing mixed associative and indexed arrays...\n");
+
+        $handler = $this->createHandler('');
+        $metadata = [
+            'user' => [
+                'id' => 123,
+                'name' => 'John',
+                'tags' => ['admin', 'developer'], // indexed - should be skipped
+                'settings' => [
+                    'theme' => 'dark',
+                    'notifications' => ['email', 'sms'], // indexed - should be skipped
+                ],
+            ],
+        ];
+
+        $result = $this->invokePrivateMethod($handler, 'sanitizeStructuredMetadata', [$metadata]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('user', $result);
+        $this->assertIsArray($result['user']);
+        $this->assertArrayHasKey('id', $result['user']);
+        $this->assertArrayHasKey('name', $result['user']);
+        $this->assertArrayNotHasKey('tags', $result['user']); // indexed array excluded
+        $this->assertArrayHasKey('settings', $result['user']);
+        $this->assertArrayHasKey('theme', $result['user']['settings']);
+        $this->assertArrayNotHasKey('notifications', $result['user']['settings']); // indexed array excluded
+
+        fwrite(STDERR, "    ✓ Mixed array types handled correctly\n");
+    }
+
+    /**
+     * Test: Empty associative arrays are skipped
+     *
+     * Empty associative arrays (after filtering) should not be included.
+     */
+    public function testSanitizeStructuredMetadataHandlesEmptyAssociativeArrays()
+    {
+        fwrite(STDERR, "  → Testing empty associative arrays...\n");
+
+        $handler = $this->createHandler('');
+        $metadata = [
+            'user_id' => 123,
+            'empty_object' => [],
+            'object_with_only_indexed_array' => [
+                'tags' => ['tag1', 'tag2'], // only indexed array, whole object becomes empty
+            ],
+        ];
+
+        $result = $this->invokePrivateMethod($handler, 'sanitizeStructuredMetadata', [$metadata]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('user_id', $result);
+        // Empty arrays should be skipped
+        $this->assertArrayNotHasKey('empty_object', $result);
+        $this->assertArrayNotHasKey('object_with_only_indexed_array', $result);
+
+        fwrite(STDERR, "    ✓ Empty associative arrays skipped\n");
+    }
+
+    /**
+     * Test: Deep nesting with various types
+     *
+     * Test a complex real-world scenario with deep nesting.
+     */
+    public function testSanitizeStructuredMetadataHandlesDeeplyNestedStructures()
+    {
+        fwrite(STDERR, "  → Testing deeply nested structures...\n");
+
+        $handler = $this->createHandler('');
+        $metadata = [
+            'request' => [
+                'method' => 'POST',
+                'path' => '/api/users',
+                'headers' => [
+                    'content-type' => 'application/json',
+                    'accept' => 'application/json',
+                ],
+                'body' => [
+                    'user' => [
+                        'name' => 'John',
+                        'email' => 'john@example.com',
+                        'roles' => ['admin', 'user'], // indexed - skipped
+                    ],
+                ],
+            ],
+        ];
+
+        $result = $this->invokePrivateMethod($handler, 'sanitizeStructuredMetadata', [$metadata]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('request', $result);
+        $this->assertIsArray($result['request']);
+        $this->assertArrayHasKey('method', $result['request']);
+        $this->assertArrayHasKey('headers', $result['request']);
+        $this->assertArrayHasKey('body', $result['request']);
+        $this->assertEquals('POST', $result['request']['method']);
+        $this->assertEquals('application/json', $result['request']['headers']['content-type']);
+        $this->assertEquals('John', $result['request']['body']['user']['name']);
+        $this->assertArrayNotHasKey('roles', $result['request']['body']['user']); // indexed array skipped
+
+        fwrite(STDERR, "    ✓ Deeply nested structures handled correctly\n");
+    }
+
+    /**
+     * Test: All null values in nested structure are removed
+     */
+    public function testSanitizeStructuredMetadataRemovesAllNullValuesRecursively()
+    {
+        fwrite(STDERR, "  → Testing recursive null value removal...\n");
+
+        $handler = $this->createHandler('');
+        $metadata = [
+            'user' => [
+                'id' => 123,
+                'name' => null,
+                'profile' => [
+                    'email' => 'test@example.com',
+                    'phone' => null,
+                ],
+            ],
+        ];
+
+        $result = $this->invokePrivateMethod($handler, 'sanitizeStructuredMetadata', [$metadata]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('user', $result);
+        $this->assertArrayHasKey('id', $result['user']);
+        $this->assertArrayNotHasKey('name', $result['user']); // null removed
+        $this->assertArrayHasKey('profile', $result['user']);
+        $this->assertArrayHasKey('email', $result['user']['profile']);
+        $this->assertArrayNotHasKey('phone', $result['user']['profile']); // null removed
+
+        fwrite(STDERR, "    ✓ Null values removed recursively\n");
+    }
+
+    /**
+     * Test: Object with only primitives is expanded
+     */
+    public function testSanitizeStructuredMetadataHandlesSimpleObject()
+    {
+        fwrite(STDERR, "  → Testing simple object with primitives...\n");
+
+        $handler = $this->createHandler('');
+        
+        $obj = new \stdClass();
+        $obj->id = 123;
+        $obj->name = 'Test';
+        $obj->active = true;
+        
+        $metadata = [
+            'data' => $obj,
+        ];
+
+        $result = $this->invokePrivateMethod($handler, 'sanitizeStructuredMetadata', [$metadata]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('data', $result);
+        $this->assertIsArray($result['data']);
+        $this->assertArrayHasKey('id', $result['data']);
+        $this->assertArrayHasKey('name', $result['data']);
+        $this->assertArrayHasKey('active', $result['data']);
+        $this->assertEquals('123', $result['data']['id']);
+        $this->assertEquals('Test', $result['data']['name']);
+        $this->assertEquals('true', $result['data']['active']);
+
+        fwrite(STDERR, "    ✓ Simple object expanded correctly\n");
     }
 }
