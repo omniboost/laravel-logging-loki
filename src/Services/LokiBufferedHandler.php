@@ -433,21 +433,25 @@ class LokiBufferedHandler
 
         // Arrays: distinguish between associative (objects) and indexed (lists)
         if (is_array($value)) {
+            // Empty arrays are treated as indexed (not compatible)
+            if (empty($value)) {
+                return null;
+            }
+
             // Check if array is associative (has string keys or non-sequential numeric keys)
             $keys = array_keys($value);
-            $isAssociative = !empty($keys) && ($keys !== range(0, count($value) - 1));
+            $isAssociative = $keys !== range(0, count($value) - 1);
 
             if ($isAssociative) {
                 // Associative array: recursively process each value
                 $result = [];
                 foreach ($value as $k => $v) {
                     $compVal = $this->toLokiCompatible($v);
-                    // Only include if the converted value is not null
-                    // (null means it's not compatible, like an indexed array)
-                    if ($compVal !== null || is_null($v)) {
+                    // Include if: compatible value OR original value was explicitly null
+                    // Skip if: incompatible (like indexed array) where compVal is null but original wasn't
+                    if (!($compVal === null && $v !== null)) {
                         $result[$k] = $compVal;
                     }
-                    // Skip incompatible values (indexed arrays, etc.)
                 }
                 return $result;
             } else {
@@ -479,12 +483,8 @@ class LokiBufferedHandler
             // Convert to Loki-compatible format
             $compatible = $this->toLokiCompatible($value);
 
-            // Skip if not compatible (e.g., indexed array)
-            if ($compatible === null && $value !== null) {
-                continue;
-            }
-
-            // Skip null values - Loki doesn't accept them
+            // Skip null values - either incompatible (indexed arrays) or explicitly null
+            // Loki doesn't accept null values in structured metadata
             if ($compatible === null) {
                 continue;
             }
