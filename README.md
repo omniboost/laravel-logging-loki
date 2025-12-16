@@ -68,6 +68,7 @@ Add the Loki channel to your `config/logging.php`:
         'password' => env('LOKI_PASSWORD'),
         'gzip_compression' => env('LOKI_GZIP_COMPRESSION', true),
         'structured_metadata_prefix' => env('LOKI_STRUCTURED_METADATA_PREFIX', ''),
+        'labels_prefix' => env('LOKI_LABELS_PREFIX', ''),
         'labels' => [
             'app' => env('APP_NAME', 'laravel'),
             'env' => env('APP_ENV', 'production'),
@@ -113,7 +114,11 @@ Log::warning('High memory usage detected');
 
 ### Adding Custom Labels
 
-You can add custom labels to individual log entries:
+You can add custom labels to individual log entries. Labels are indexed by Loki and enable fast filtering and querying in Grafana.
+
+#### Traditional Approach (labels key)
+
+By default (when `labels_prefix` is empty), you can add labels using the `labels` key:
 
 ```php
 Log::info('API request completed', [
@@ -126,6 +131,35 @@ Log::info('API request completed', [
     'user_id' => 789,
 ]);
 ```
+
+#### Label Prefixing
+
+Set a prefix to automatically extract labels from context fields that start with that prefix. This provides a more flexible way to add labels:
+
+```php
+// In .env or config
+LOKI_LABELS_PREFIX=label_
+
+// In your code
+Log::info('Payment processed', [
+    'label_user_id' => 456,
+    'label_endpoint' => '/api/payment',
+    'label_method' => 'POST',
+    'internal_flag' => true,  // Not included (no prefix)
+]);
+// user_id, endpoint, and method will be added as labels (prefix removed)
+```
+
+**Key Features:**
+- Labels with `null` or empty string values are automatically excluded
+- The prefix is removed from the label name in Loki
+- When prefix is configured, the traditional `labels` key is ignored
+- Labels are indexed and enable fast queries like `{endpoint="/api/payment"}`
+
+**Common Use Cases:**
+- HTTP request metadata: `label_endpoint`, `label_method`, `label_status_code`
+- Application components: `label_service`, `label_component`, `label_module`
+- Environment context: `label_datacenter`, `label_region`, `label_instance`
 
 ### Adding Structured Metadata
 
@@ -278,6 +312,7 @@ This library uses a two-tier buffering system for optimal performance:
 | `debug` | Enable debug logging | `false` |
 | `labels` | Default labels for all logs | `['app', 'env', 'server']` |
 | `structured_metadata_prefix` | Prefix for extracting structured metadata from context | `''` (empty = all context) |
+| `labels_prefix` | Prefix for extracting labels from context | `''` (empty = use 'labels' key) |
 
 ## Queue Configuration
 
