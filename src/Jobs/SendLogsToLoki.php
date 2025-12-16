@@ -24,6 +24,7 @@ class SendLogsToLoki implements ShouldQueue
     private string $url;
     private ?string $username;
     private ?string $password;
+    private bool $gzipCompression;
 
     /**
      * Create a new job instance.
@@ -32,6 +33,7 @@ class SendLogsToLoki implements ShouldQueue
      * @param string $url Loki URL (e.g., http://loki:3100)
      * @param string|null $username Optional basic auth username
      * @param string|null $password Optional basic auth password
+     * @param bool $gzipCompression Whether to use GZIP compression
      *
      * Payload structure:
      * [
@@ -46,12 +48,13 @@ class SendLogsToLoki implements ShouldQueue
      *   ]
      * ]
      */
-    public function __construct(array $entries, string $url, ?string $username = null, ?string $password = null)
+    public function __construct(array $entries, string $url, ?string $username = null, ?string $password = null, bool $gzipCompression = true)
     {
         $this->entries = $entries;
         $this->url = $url;
         $this->username = $username;
         $this->password = $password;
+        $this->gzipCompression = $gzipCompression;
 
         // Use the configured queue connection for loki
         $this->onQueue(config('loki.queue', 'default'));
@@ -70,7 +73,7 @@ class SendLogsToLoki implements ShouldQueue
         }
 
         // create client
-        $client = new LokiClient($this->url, $this->username, $this->password);
+        $client = new LokiClient($this->url, $this->username, $this->password, $this->gzipCompression);
 
         // Batch logs by labels into streams (already done, just pass through)
         $streams = $this->prepareStreams($this->entries);

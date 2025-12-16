@@ -45,6 +45,7 @@ class LokiServiceProvider extends ServiceProvider
                     defaultLabels: $config['labels'] ?? config('loki.labels', []),
                     username: $config['username'] ?? config('loki.username'),
                     password: $config['password'] ?? config('loki.password'),
+                    gzipCompression: $config['gzip_compression'] ?? config('loki.gzip_compression', true),
                     structuredMetadataPrefix: $config['structured_metadata_prefix'] ?? config('loki.structured_metadata_prefix', ''),
                     memoryBufferSize: $config['memory_buffer_size'] ?? config('loki.memory_buffer_size', 10),
                     memoryFlushInterval: $config['memory_flush_interval'] ?? config('loki.memory_flush_interval', 1.0)

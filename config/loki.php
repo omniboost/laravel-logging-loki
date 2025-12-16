@@ -97,6 +97,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | GZIP Compression
+    |--------------------------------------------------------------------------
+    |
+    | Enable GZIP compression for data sent to Loki. This reduces payload size
+    | and allows more data to be sent per request, helping to maximize usage
+    | of Grafana's request size limits.
+    |
+    */
+    'gzip_compression' => env('LOKI_GZIP_COMPRESSION', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Structured Metadata Prefix
     |--------------------------------------------------------------------------
     |

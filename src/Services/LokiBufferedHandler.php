@@ -20,6 +20,7 @@ class LokiBufferedHandler
     private string $url;
     private ?string $username;
     private ?string $password;
+    private bool $gzipCompression;
     private array $defaultLabels;
     private string $structuredMetadataPrefix;
 
@@ -41,6 +42,7 @@ class LokiBufferedHandler
      * @param array $defaultLabels Default labels to apply to all logs
      * @param string|null $username Optional basic auth username
      * @param string|null $password Optional basic auth password
+     * @param bool $gzipCompression Whether to use GZIP compression
      * @param string $structuredMetadataPrefix Prefix for extracting structured metadata from context
      * @param bool $bubble Whether to bubble the record to the next handler
      * @param int $memoryBufferSize Number of logs to buffer in memory before flushing to cache (default: 10)
@@ -53,6 +55,7 @@ class LokiBufferedHandler
         array $defaultLabels = [],
         ?string $username = null,
         ?string $password = null,
+        bool $gzipCompression = true,
         string $structuredMetadataPrefix = '',
         int $memoryBufferSize = 100,
         float $memoryFlushInterval = 1.0
@@ -62,6 +65,7 @@ class LokiBufferedHandler
         $this->flushInterval = $flushInterval;
         $this->username = $username;
         $this->password = $password;
+        $this->gzipCompression = $gzipCompression;
         $this->defaultLabels = $defaultLabels;
         $this->structuredMetadataPrefix = $structuredMetadataPrefix;
 
@@ -314,7 +318,7 @@ class LokiBufferedHandler
     {
         // Dispatch job to send logs to Loki asynchronously
         // Note: Buffer should already be cleared atomically before this is called
-        SendLogsToLoki::dispatch($buffer, $this->url, $this->username, $this->password);
+        SendLogsToLoki::dispatch($buffer, $this->url, $this->username, $this->password, $this->gzipCompression);
     }
 
     /**
