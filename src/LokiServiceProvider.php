@@ -47,6 +47,7 @@ class LokiServiceProvider extends ServiceProvider
                     password: $config['password'] ?? config('loki.password'),
                     gzipCompression: $config['gzip_compression'] ?? config('loki.gzip_compression', true),
                     structuredMetadataPrefix: $config['structured_metadata_prefix'] ?? config('loki.structured_metadata_prefix', ''),
+                    labelsPrefix: $config['labels_prefix'] ?? config('loki.labels_prefix', ''),
                     memoryBufferSize: $config['memory_buffer_size'] ?? config('loki.memory_buffer_size', 10),
                     memoryFlushInterval: $config['memory_flush_interval'] ?? config('loki.memory_flush_interval', 1.0)
                 )
