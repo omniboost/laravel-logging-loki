@@ -23,6 +23,7 @@ class LokiBufferedHandler
     private bool $gzipCompression;
     private array $defaultLabels;
     private string $structuredMetadataPrefix;
+    private string $labelsPrefix;
 
     // In-memory buffer properties
     private array $memoryBuffer = [];
@@ -44,6 +45,7 @@ class LokiBufferedHandler
      * @param string|null $password Optional basic auth password
      * @param bool $gzipCompression Whether to use GZIP compression
      * @param string $structuredMetadataPrefix Prefix for extracting structured metadata from context
+     * @param string $labelsPrefix Prefix for extracting labels from context
      * @param bool $bubble Whether to bubble the record to the next handler
      * @param int $memoryBufferSize Number of logs to buffer in memory before flushing to cache (default: 10)
      * @param float $memoryFlushInterval Max seconds to wait before flushing memory buffer (default: 1.0)
@@ -57,6 +59,7 @@ class LokiBufferedHandler
         ?string $password = null,
         bool $gzipCompression = true,
         string $structuredMetadataPrefix = '',
+        string $labelsPrefix = '',
         int $memoryBufferSize = 100,
         float $memoryFlushInterval = 1.0
     ) {
@@ -68,6 +71,7 @@ class LokiBufferedHandler
         $this->gzipCompression = $gzipCompression;
         $this->defaultLabels = $defaultLabels;
         $this->structuredMetadataPrefix = $structuredMetadataPrefix;
+        $this->labelsPrefix = $labelsPrefix;
 
         // Initialize in-memory buffer settings
         // Memory buffer size cannot be lower than 1 or higher than cache buffer size
@@ -349,13 +353,12 @@ class LokiBufferedHandler
             $structuredMetadata
         );
 
-        // Combine default labels with standard labels
+        // Start with default labels
         $labels = array_merge($this->defaultLabels);
 
-        // Add extra context labels if available
-        if (!empty($record->context['labels'])) {
-            $labels = array_merge($labels, $record->context['labels']);
-        }
+        // Extract and merge labels from context based on prefix configuration
+        $contextLabels = $this->extractLabels($record->context);
+        $labels = array_merge($labels, $contextLabels);
 
         // Overwrite labels
         $logEntry->stream = $labels;
@@ -408,21 +411,27 @@ class LokiBufferedHandler
     }
 
     /**
-     * Sanitize structured metadata to comply with Loki requirements
+     * Sanitize values to comply with Loki requirements
      * - Only string values (no null, objects, or arrays)
      * - Converts scalars to strings
      * - JSON encodes complex types
      *
-     * @param array $metadata
+     * @param array $data Key-value pairs to sanitize
+     * @param bool $skipEmptyStrings Whether to exclude empty strings from the result
      * @return array<string, string>
      */
-    private function sanitizeStructuredMetadata(array $metadata): array
+    private function sanitizeKeyValuePairs(array $data): array
     {
         $sanitized = [];
 
-        foreach ($metadata as $key => $value) {
+        foreach ($data as $key => $value) {
             // Skip null values - Loki doesn't accept them
             if ($value === null) {
+                continue;
+            }
+
+            // Skip empty strings
+            if ($value === '') {
                 continue;
             }
 
@@ -443,6 +452,66 @@ class LokiBufferedHandler
         }
 
         return $sanitized;
+    }
+
+    /**
+     * Sanitize structured metadata to comply with Loki requirements
+     *
+     * @param array $metadata
+     * @return array<string, string>
+     */
+    private function sanitizeStructuredMetadata(array $metadata): array
+    {
+        return $this->sanitizeKeyValuePairs($metadata);
+    }
+
+    /**
+     * Extract labels from context based on prefix configuration
+     *
+     * @param array $context Log context array
+     * @return array<string, string>
+     */
+    private function extractLabels(array $context): array
+    {
+        // If context is empty, return empty array
+        if (empty($context)) {
+            return [];
+        }
+
+        // Extract only fields that start with the prefix
+        $labels = [];
+        $prefixLength = strlen($this->labelsPrefix);
+
+        foreach ($context as $key => $value) {
+            // Skip 'label' if it doesn't start with the prefix
+            if (str_starts_with($key, $this->labelsPrefix) === false) {
+                continue;
+            }
+
+            // Remove the prefix from the key
+            $cleanKey = substr($key, $prefixLength);
+
+            // Skip if the clean key is empty (key was exactly the prefix)
+            if (empty($cleanKey)) {
+                continue;
+            }
+
+            // Add to labels
+            $labels[$cleanKey] = $value;
+        }
+
+        return $this->sanitizeLabels($labels);
+    }
+
+    /**
+     * Sanitize labels to comply with Loki requirements
+     *
+     * @param array $labels
+     * @return array<string, string>
+     */
+    private function sanitizeLabels(array $labels): array
+    {
+        return $this->sanitizeKeyValuePairs($labels);
     }
 
     /**
