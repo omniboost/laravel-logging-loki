@@ -116,7 +116,7 @@ Log::warning('High memory usage detected');
 
 You can add custom labels to individual log entries. Labels are indexed by Loki and enable fast filtering and querying in Grafana.
 
-Labels are extracted from context fields that start with the configured prefix (default: `label_`):
+Labels are extracted from **both** the log's `context` and `extra` fields that start with the configured prefix (default: `label_`):
 
 ```php
 // Default behavior (LOKI_LABELS_PREFIX=label_)
@@ -130,6 +130,8 @@ Log::info('Payment processed', [
 ```
 
 **Key Features:**
+- Labels are extracted from **both** `context` and `extra` arrays  
+- If the same label key exists in both, the `extra` value takes precedence
 - Labels with `null` or empty string values are automatically excluded
 - The prefix is removed from the label name in Loki
 - Labels are indexed and enable fast queries like `{endpoint="/api/payment"}`
@@ -143,13 +145,16 @@ Log::info('Payment processed', [
 
 ### Adding Structured Metadata
 
-You can include additional context data as structured metadata in your logs. The `structured_metadata_prefix` configuration controls how structured metadata is extracted from the log context:
+You can include additional context data as structured metadata in your logs. The `structured_metadata_prefix` configuration controls how structured metadata is extracted from the log context and extra fields:
 
-**Note:** Values with `null` or empty strings are automatically excluded from structured metadata.
+**Key Features:**
+- Structured metadata is extracted from **both** the log's `context` and `extra` arrays
+- If the same key exists in both, the `extra` value takes precedence
+- Values with `null` or empty strings are automatically excluded from structured metadata
 
 #### Include All Context as Structured Metadata (Default)
 
-When `structured_metadata_prefix` is empty (default), all context data (except `labels`) is added as structured metadata:
+When `structured_metadata_prefix` is empty (default), all context and extra data (except `labels`) is added as structured metadata:
 
 ```php
 Log::info('User action', [
@@ -183,6 +188,24 @@ Log::info('Payment processed', [
 - Request tracking: `meta_request_id`, `meta_session_id`
 - Business context: `meta_order_id`, `meta_transaction_id`
 - Performance metrics: `meta_duration_ms`, `meta_memory_mb`
+
+#### Using Context and Extra Fields
+
+Both structured metadata and labels support extraction from the log's `context` and `extra` arrays. This is particularly useful when working with Laravel's logging system or Monolog processors that add data to the `extra` field.
+
+```php
+// Example: Using context (standard logging)
+Log::info('User logged in', [
+    'user_id' => 123,
+    'label_endpoint' => '/login',
+]);
+
+// Example: Extra fields (added by processors or internally)
+// When using Monolog processors, data may be added to 'extra'
+// This library automatically merges both context and extra for extraction
+```
+
+**Precedence:** If the same key exists in both `context` and `extra`, the value from `extra` takes precedence.
 
 ### GZIP Compression
 

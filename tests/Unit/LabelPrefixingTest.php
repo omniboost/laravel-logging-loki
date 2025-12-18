@@ -498,4 +498,126 @@ class LabelPrefixingTest extends TestCase
 
         fwrite(STDERR, "    ✓ Null and empty labels correctly excluded from stream\n");
     }
+
+    /**
+     * Test: Extract labels from both context and extra fields
+     *
+     * The feature should merge both context and extra arrays when extracting
+     * labels, allowing labels to come from either source.
+     */
+    public function testExtractLabelsFromContextAndExtra()
+    {
+        fwrite(STDERR, "  → Testing label extraction from both context and extra fields...\n");
+
+        $handler = $this->createHandler('label_');
+        $record = new LogRecord(
+            datetime: new \DateTimeImmutable(),
+            channel: 'test',
+            level: Level::Info,
+            message: 'Test message',
+            context: [
+                'label_user_id' => 456,
+                'label_endpoint' => '/api/users',
+            ],
+            extra: [
+                'label_method' => 'GET',
+                'label_status_code' => 200,
+            ]
+        );
+
+        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$record]);
+
+        $this->assertIsArray($result);
+        // Labels from context
+        $this->assertArrayHasKey('user_id', $result);
+        $this->assertArrayHasKey('endpoint', $result);
+        // Labels from extra
+        $this->assertArrayHasKey('method', $result);
+        $this->assertArrayHasKey('status_code', $result);
+        
+        $this->assertEquals('456', $result['user_id']);
+        $this->assertEquals('/api/users', $result['endpoint']);
+        $this->assertEquals('GET', $result['method']);
+        $this->assertEquals('200', $result['status_code']);
+
+        fwrite(STDERR, "    ✓ Both context and extra fields included as labels\n");
+    }
+
+    /**
+     * Test: Extra labels override context labels with same key
+     *
+     * When both context and extra contain the same label key, array_merge behavior
+     * means the extra value should take precedence (last value wins).
+     */
+    public function testExtractLabelsExtraOverridesContext()
+    {
+        fwrite(STDERR, "  → Testing extra label precedence over context...\n");
+
+        $handler = $this->createHandler('label_');
+        $record = new LogRecord(
+            datetime: new \DateTimeImmutable(),
+            channel: 'test',
+            level: Level::Info,
+            message: 'Test message',
+            context: [
+                'label_environment' => 'staging',
+                'label_version' => '1.0.0',
+            ],
+            extra: [
+                'label_environment' => 'production',  // This should override context value
+                'label_region' => 'us-east-1',
+            ]
+        );
+
+        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$record]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('environment', $result);
+        $this->assertArrayHasKey('version', $result);
+        $this->assertArrayHasKey('region', $result);
+        
+        $this->assertEquals('production', $result['environment']);  // Extra value wins
+        $this->assertEquals('1.0.0', $result['version']);
+        $this->assertEquals('us-east-1', $result['region']);
+
+        fwrite(STDERR, "    ✓ Extra label correctly overrides context label\n");
+    }
+
+    /**
+     * Test: Extract labels from extra without context
+     *
+     * Labels should work correctly even when context is empty and all
+     * labels come from the extra array.
+     */
+    public function testExtractLabelsFromExtraOnly()
+    {
+        fwrite(STDERR, "  → Testing label extraction from extra only...\n");
+
+        $handler = $this->createHandler('label_');
+        $record = new LogRecord(
+            datetime: new \DateTimeImmutable(),
+            channel: 'test',
+            level: Level::Info,
+            message: 'Test message',
+            context: [],
+            extra: [
+                'label_service' => 'api',
+                'label_component' => 'auth',
+                'label_instance' => 'i-123456',
+            ]
+        );
+
+        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$record]);
+
+        $this->assertIsArray($result);
+        $this->assertArrayHasKey('service', $result);
+        $this->assertArrayHasKey('component', $result);
+        $this->assertArrayHasKey('instance', $result);
+        
+        $this->assertEquals('api', $result['service']);
+        $this->assertEquals('auth', $result['component']);
+        $this->assertEquals('i-123456', $result['instance']);
+
+        fwrite(STDERR, "    ✓ Labels extracted from extra when context is empty\n");
+    }
 }
