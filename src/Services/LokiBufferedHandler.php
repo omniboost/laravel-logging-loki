@@ -411,21 +411,27 @@ class LokiBufferedHandler
     }
 
     /**
-     * Sanitize structured metadata to comply with Loki requirements
+     * Sanitize values to comply with Loki requirements
      * - Only string values (no null, objects, or arrays)
      * - Converts scalars to strings
      * - JSON encodes complex types
      *
-     * @param array $metadata
+     * @param array $data Key-value pairs to sanitize
+     * @param bool $skipEmptyStrings Whether to exclude empty strings from the result
      * @return array<string, string>
      */
-    private function sanitizeStructuredMetadata(array $metadata): array
+    private function sanitizeKeyValuePairs(array $data): array
     {
         $sanitized = [];
 
-        foreach ($metadata as $key => $value) {
+        foreach ($data as $key => $value) {
             // Skip null values - Loki doesn't accept them
             if ($value === null) {
+                continue;
+            }
+
+            // Skip empty strings
+            if ($value === '') {
                 continue;
             }
 
@@ -449,6 +455,17 @@ class LokiBufferedHandler
     }
 
     /**
+     * Sanitize structured metadata to comply with Loki requirements
+     *
+     * @param array $metadata
+     * @return array<string, string>
+     */
+    private function sanitizeStructuredMetadata(array $metadata): array
+    {
+        return $this->sanitizeKeyValuePairs($metadata);
+    }
+
+    /**
      * Extract labels from context based on prefix configuration
      *
      * @param array $context Log context array
@@ -461,29 +478,26 @@ class LokiBufferedHandler
             return [];
         }
 
-        // If no prefix is configured, use the traditional 'labels' key approach
-        if (empty($this->labelsPrefix)) {
-            // Add extra context labels if available
-            if (!empty($context['labels']) && is_array($context['labels'])) {
-                return $this->sanitizeLabels($context['labels']);
-            }
-            return [];
-        }
-
         // Extract only fields that start with the prefix
         $labels = [];
         $prefixLength = strlen($this->labelsPrefix);
 
         foreach ($context as $key => $value) {
-            if (str_starts_with($key, $this->labelsPrefix)) {
-                // Remove the prefix from the key
-                $cleanKey = substr($key, $prefixLength);
-
-                // Skip if the clean key is empty (key was exactly the prefix)
-                if ($cleanKey !== '') {
-                    $labels[$cleanKey] = $value;
-                }
+            // Skip 'label' if it doesn't start with the prefix
+            if (str_starts_with($key, $this->labelsPrefix) === false) {
+                continue;
             }
+
+            // Remove the prefix from the key
+            $cleanKey = substr($key, $prefixLength);
+
+            // Skip if the clean key is empty (key was exactly the prefix)
+            if (empty($cleanKey)) {
+                continue;
+            }
+
+            // Add to labels
+            $labels[$cleanKey] = $value;
         }
 
         return $this->sanitizeLabels($labels);
@@ -491,45 +505,13 @@ class LokiBufferedHandler
 
     /**
      * Sanitize labels to comply with Loki requirements
-     * - Only string values (no null or empty strings)
-     * - Converts scalars to strings
-     * - JSON encodes complex types
      *
      * @param array $labels
      * @return array<string, string>
      */
     private function sanitizeLabels(array $labels): array
     {
-        $sanitized = [];
-
-        foreach ($labels as $key => $value) {
-            // Skip null values - Loki doesn't accept them
-            if ($value === null) {
-                continue;
-            }
-
-            // Skip empty strings - they are not useful as labels
-            if ($value === '') {
-                continue;
-            }
-
-            // JSON encode arrays and objects - Loki labels only accept string values
-            if (is_array($value) || is_object($value)) {
-                $sanitized[$key] = json_encode($value);
-                continue;
-            }
-
-            // Convert boolean to string
-            if (is_bool($value)) {
-                $sanitized[$key] = $value ? 'true' : 'false';
-                continue;
-            }
-
-            // Convert scalar values to strings
-            $sanitized[$key] = (string) $value;
-        }
-
-        return $sanitized;
+        return $this->sanitizeKeyValuePairs($labels);
     }
 
     /**
