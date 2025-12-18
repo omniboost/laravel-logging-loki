@@ -662,4 +662,149 @@ class StructuredMetadataTest extends TestCase
 
         fwrite(STDERR, "    ✓ Prefixed fields extracted from both context and extra\n");
     }
+
+    /**
+     * Test: Label-prefixed fields are excluded from structured metadata
+     *
+     * When both structured metadata and labels use different prefixes,
+     * fields matching the label prefix should NOT appear in structured metadata
+     * to prevent duplication.
+     */
+    public function testLabelPrefixedFieldsExcludedFromStructuredMetadata()
+    {
+        fwrite(STDERR, "  → Testing label-prefixed fields excluded from structured metadata...\n");
+
+        // Create handler with both structured metadata prefix (empty = all) and labels prefix
+        $handler = new LokiBufferedHandler(
+            url: 'http://localhost:3100',
+            bufferSize: 100,
+            flushInterval: 5.0,
+            defaultLabels: ['app' => 'test'],
+            username: null,
+            password: null,
+            structuredMetadataPrefix: '', // Empty means all context included
+            labelsPrefix: 'label_', // But fields starting with label_ should be excluded
+        );
+
+        $record = $this->createLogRecord([
+            'label_integration' => 'stripe',
+            'label_user_id' => 123,
+            'regular_field' => 'value',
+            'another_field' => 'data',
+        ]);
+
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
+
+        $this->assertIsArray($result);
+        // Label-prefixed fields should NOT be in structured metadata
+        $this->assertArrayNotHasKey('label_integration', $result);
+        $this->assertArrayNotHasKey('label_user_id', $result);
+        // Regular fields should be included
+        $this->assertArrayHasKey('regular_field', $result);
+        $this->assertArrayHasKey('another_field', $result);
+        $this->assertEquals('value', $result['regular_field']);
+        $this->assertEquals('data', $result['another_field']);
+
+        fwrite(STDERR, "    ✓ Label-prefixed fields correctly excluded from structured metadata\n");
+    }
+
+    /**
+     * Test: Label-prefixed fields are excluded even with custom structured metadata prefix
+     *
+     * When both structured metadata and labels use different prefixes,
+     * label-prefixed fields should never appear in structured metadata,
+     * even when a custom structured metadata prefix is configured.
+     */
+    public function testLabelPrefixedFieldsExcludedWithCustomStructuredPrefix()
+    {
+        fwrite(STDERR, "  → Testing label exclusion with custom structured metadata prefix...\n");
+
+        // Create handler with both prefixes configured
+        $handler = new LokiBufferedHandler(
+            url: 'http://localhost:3100',
+            bufferSize: 100,
+            flushInterval: 5.0,
+            defaultLabels: ['app' => 'test'],
+            username: null,
+            password: null,
+            structuredMetadataPrefix: 'meta_',
+            labelsPrefix: 'label_',
+        );
+
+        $record = $this->createLogRecord([
+            'label_integration' => 'stripe',
+            'meta_user_id' => 123,
+            'meta_request_id' => 'req-456',
+            'regular_field' => 'value',
+        ]);
+
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
+
+        $this->assertIsArray($result);
+        // Label-prefixed fields should NOT be in structured metadata
+        $this->assertArrayNotHasKey('label_integration', $result);
+        // Meta-prefixed fields should be included (with prefix removed)
+        $this->assertArrayHasKey('user_id', $result);
+        $this->assertArrayHasKey('request_id', $result);
+        // Regular field should not be included (no meta_ prefix)
+        $this->assertArrayNotHasKey('regular_field', $result);
+        
+        $this->assertEquals('123', $result['user_id']);
+        $this->assertEquals('req-456', $result['request_id']);
+
+        fwrite(STDERR, "    ✓ Label-prefixed fields excluded even with custom structured metadata prefix\n");
+    }
+
+    /**
+     * Test: Integration test - Full log entry preparation validates no duplication
+     *
+     * This end-to-end test verifies that when a log entry is prepared,
+     * label-prefixed fields appear only in labels, not in structured metadata.
+     */
+    public function testPrepareLogEntryExcludesLabelFieldsFromStructuredMetadata()
+    {
+        fwrite(STDERR, "  → Testing full log entry preparation without duplication...\n");
+
+        $handler = new LokiBufferedHandler(
+            url: 'http://localhost:3100',
+            bufferSize: 100,
+            flushInterval: 5.0,
+            defaultLabels: ['app' => 'test'],
+            username: null,
+            password: null,
+            structuredMetadataPrefix: '', // All context included in structured metadata
+            labelsPrefix: 'label_', // Except label-prefixed fields
+        );
+
+        $context = [
+            'label_integration' => 'stripe',
+            'label_endpoint' => '/api/payment',
+            'user_id' => 123,
+            'amount' => 99.99,
+        ];
+        $record = $this->createLogRecord($context);
+
+        $result = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$record]);
+
+        $this->assertInstanceOf(LokiLogEntry::class, $result);
+        
+        // Labels should contain the label-prefixed fields (with prefix removed)
+        $this->assertIsArray($result->stream);
+        $this->assertArrayHasKey('integration', $result->stream);
+        $this->assertArrayHasKey('endpoint', $result->stream);
+        $this->assertEquals('stripe', $result->stream['integration']);
+        $this->assertEquals('/api/payment', $result->stream['endpoint']);
+        
+        // Structured metadata should NOT contain label-prefixed fields
+        $this->assertIsArray($result->structuredMetadata);
+        $this->assertArrayNotHasKey('label_integration', $result->structuredMetadata);
+        $this->assertArrayNotHasKey('label_endpoint', $result->structuredMetadata);
+        // But should contain regular fields
+        $this->assertArrayHasKey('user_id', $result->structuredMetadata);
+        $this->assertArrayHasKey('amount', $result->structuredMetadata);
+        $this->assertEquals('123', $result->structuredMetadata['user_id']);
+        $this->assertEquals('99.99', $result->structuredMetadata['amount']);
+
+        fwrite(STDERR, "    ✓ Full log entry prepared correctly without duplication\n");
+    }
 }

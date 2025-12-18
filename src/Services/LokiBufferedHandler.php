@@ -383,9 +383,22 @@ class LokiBufferedHandler
         }
 
         // Remove 'labels' key from structured metadata as it's handled separately
+        // Also exclude any fields that match the labels prefix to prevent duplication
         $contextWithoutLabels = array_filter(
             $context,
-            fn($key) => $key !== 'labels',
+            function($key) {
+                // Always exclude 'labels' key
+                if ($key === 'labels') {
+                    return false;
+                }
+                
+                // Exclude fields matching the labels prefix (if configured)
+                if (!empty($this->labelsPrefix) && str_starts_with($key, $this->labelsPrefix)) {
+                    return false;
+                }
+                
+                return true;
+            },
             ARRAY_FILTER_USE_KEY
         );
 
