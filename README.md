@@ -116,9 +116,7 @@ Log::warning('High memory usage detected');
 
 You can add custom labels to individual log entries. Labels are indexed by Loki and enable fast filtering and querying in Grafana.
 
-#### Label Prefixing (Default)
-
-By default, labels are extracted from context fields that start with `label_` prefix:
+Labels are extracted from context fields that start with the configured prefix (default: `label_`):
 
 ```php
 // Default behavior (LOKI_LABELS_PREFIX=label_)
@@ -131,28 +129,9 @@ Log::info('Payment processed', [
 // user_id, endpoint, and method will be added as labels (prefix removed)
 ```
 
-#### Traditional Approach (labels key)
-
-Set `LOKI_LABELS_PREFIX` to empty string to use the traditional `labels` key approach:
-
-```php
-// In .env: LOKI_LABELS_PREFIX=
-
-Log::info('API request completed', [
-    'labels' => [
-        'endpoint' => '/api/users',
-        'method' => 'GET',
-        'status' => 200,
-    ],
-    'duration_ms' => 145,
-    'user_id' => 789,
-]);
-```
-
 **Key Features:**
 - Labels with `null` or empty string values are automatically excluded
 - The prefix is removed from the label name in Loki
-- When prefix is configured, the traditional `labels` key is ignored
 - Labels are indexed and enable fast queries like `{endpoint="/api/payment"}`
 
 **Important:** Use a different prefix for labels (`label_` by default) than for structured metadata (empty by default) to avoid fields being added as both labels and structured metadata.
@@ -165,6 +144,8 @@ Log::info('API request completed', [
 ### Adding Structured Metadata
 
 You can include additional context data as structured metadata in your logs. The `structured_metadata_prefix` configuration controls how structured metadata is extracted from the log context:
+
+**Note:** Values with `null` or empty strings are automatically excluded from structured metadata.
 
 #### Include All Context as Structured Metadata (Default)
 
@@ -313,7 +294,7 @@ This library uses a two-tier buffering system for optimal performance:
 | `debug` | Enable debug logging | `false` |
 | `labels` | Default labels for all logs | `['app', 'env', 'server']` |
 | `structured_metadata_prefix` | Prefix for extracting structured metadata from context | `''` (empty = all context) |
-| `labels_prefix` | Prefix for extracting labels from context | `'label_'` (empty = use 'labels' key) |
+| `labels_prefix` | Prefix for extracting labels from context | `'label_'` |
 
 ## Queue Configuration
 

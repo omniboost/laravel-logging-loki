@@ -106,37 +106,6 @@ class LabelPrefixingTest extends TestCase
     }
 
     /**
-     * Test: Extract labels when prefix is blank (traditional mode)
-     *
-     * When the prefix is empty, ONLY the 'labels' key in context should be used
-     * for extracting labels (traditional behavior).
-     */
-    public function testExtractLabelsWithBlankPrefixUsesLabelsKey()
-    {
-        fwrite(STDERR, "  → Testing blank prefix mode (labels key only)...\n");
-
-        $handler = $this->createHandler('');
-        $context = [
-            'labels' => [
-                'user_id' => 123,
-                'action' => 'login',
-            ],
-            'other_field' => 'should_not_be_label',
-        ];
-
-        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$context]);
-
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('user_id', $result);
-        $this->assertArrayHasKey('action', $result);
-        $this->assertArrayNotHasKey('other_field', $result);
-        $this->assertEquals('123', $result['user_id']);
-        $this->assertEquals('login', $result['action']);
-
-        fwrite(STDERR, "    ✓ Labels key extracted in blank prefix mode\n");
-    }
-
-    /**
      * Test: Extract labels with a custom prefix
      *
      * When a prefix is configured, ONLY fields starting with that prefix should
@@ -187,30 +156,6 @@ class LabelPrefixingTest extends TestCase
         $this->assertEmpty($result);
 
         fwrite(STDERR, "    ✓ Empty context returns empty array\n");
-    }
-
-    /**
-     * Test: Context without labels key returns empty labels (blank prefix mode)
-     *
-     * If context doesn't contain the labels key and prefix is blank,
-     * labels extraction should return empty array.
-     */
-    public function testExtractLabelsWithBlankPrefixAndNoLabelsKey()
-    {
-        fwrite(STDERR, "  → Testing blank prefix with no labels key...\n");
-
-        $handler = $this->createHandler('');
-        $context = [
-            'user_id' => 123,
-            'action' => 'login',
-        ];
-
-        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$context]);
-
-        $this->assertIsArray($result);
-        $this->assertEmpty($result);
-
-        fwrite(STDERR, "    ✓ No labels key returns empty array in blank prefix mode\n");
     }
 
     /**
@@ -463,39 +408,6 @@ class LabelPrefixingTest extends TestCase
         }
 
         fwrite(STDERR, "    ✓ Complex scenario: all types sanitized correctly\n");
-    }
-
-    /**
-     * Test: Integration - Blank prefix uses labels key in log entry
-     *
-     * This end-to-end test verifies that when a log entry is prepared
-     * with blank prefix, the traditional 'labels' key is used for labels.
-     */
-    public function testPrepareLogEntryWithBlankPrefixUsesLabelsKey()
-    {
-        fwrite(STDERR, "  → Testing log entry preparation with blank prefix...\n");
-
-        $handler = $this->createHandler('');
-        $context = [
-            'user_id' => 123,
-            'action' => 'login',
-            'labels' => ['endpoint' => '/api/login', 'method' => 'POST'],
-        ];
-        $record = $this->createLogRecord($context);
-
-        $result = $this->invokePrivateMethod($handler, 'prepareLogEntry', [$record]);
-
-        $this->assertInstanceOf(LokiLogEntry::class, $result);
-        $this->assertIsArray($result->stream);
-        // Should have default label 'app' plus the two from context
-        $this->assertArrayHasKey('app', $result->stream);
-        $this->assertArrayHasKey('endpoint', $result->stream);
-        $this->assertArrayHasKey('method', $result->stream);
-        $this->assertEquals('test', $result->stream['app']);
-        $this->assertEquals('/api/login', $result->stream['endpoint']);
-        $this->assertEquals('POST', $result->stream['method']);
-
-        fwrite(STDERR, "    ✓ Log entry prepared with labels from labels key\n");
     }
 
     /**
