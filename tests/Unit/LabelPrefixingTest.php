@@ -115,15 +115,15 @@ class LabelPrefixingTest extends TestCase
     {
         fwrite(STDERR, "  → Testing prefix mode (selective extraction)...\n");
         $handler = $this->createHandler('label_');
-        $context = [
+        $record = $this->createLogRecord([
             'label_user_id' => 456,
             'label_endpoint' => '/api/users',
             'label_method' => 'GET',
             'internal_flag' => true,
             'labels' => ['ignored' => 'value'],  // Should be ignored when prefix is set
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$record]);
 
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
@@ -148,9 +148,9 @@ class LabelPrefixingTest extends TestCase
         fwrite(STDERR, "  → Testing empty context handling...\n");
 
         $handler = $this->createHandler('');
-        $context = [];
+        $record = $this->createLogRecord([]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$record]);
 
         $this->assertIsArray($result);
         $this->assertEmpty($result);
@@ -169,12 +169,12 @@ class LabelPrefixingTest extends TestCase
         fwrite(STDERR, "  → Testing exact prefix match edge case...\n");
 
         $handler = $this->createHandler('label_');
-        $context = [
+        $record = $this->createLogRecord([
             'label_' => 'should_be_ignored',
             'label_user_id' => 123,
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$record]);
 
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
@@ -194,12 +194,12 @@ class LabelPrefixingTest extends TestCase
     {
         fwrite(STDERR, "  → Testing no matching prefix scenario...\n");
         $handler = $this->createHandler('label_');
-        $context = [
+        $record = $this->createLogRecord([
             'user_id' => 123,
             'action' => 'login',
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractLabels', [$record]);
 
         $this->assertIsArray($result);
         $this->assertEmpty($result);

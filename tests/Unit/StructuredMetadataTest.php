@@ -115,13 +115,13 @@ class StructuredMetadataTest extends TestCase
         fwrite(STDERR, "  → Testing blank prefix mode (all context included)...\n");
 
         $handler = $this->createHandler('');
-        $context = [
+        $record = $this->createLogRecord([
             'user_id' => 123,
             'action' => 'login',
             'ip_address' => '192.168.1.1',
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
 
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
@@ -144,14 +144,14 @@ class StructuredMetadataTest extends TestCase
     {
         fwrite(STDERR, "  → Testing prefix mode (selective extraction)...\n");
         $handler = $this->createHandler('meta_');
-        $context = [
+        $record = $this->createLogRecord([
             'meta_user_id' => 456,
             'meta_order_id' => 789,
             'meta_amount' => 99.99,
             'internal_flag' => true,
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
 
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
@@ -176,12 +176,12 @@ class StructuredMetadataTest extends TestCase
         fwrite(STDERR, "  → Testing labels exclusion...\n");
 
         $handler = $this->createHandler('');
-        $context = [
+        $record = $this->createLogRecord([
             'user_id' => 123,
             'labels' => ['level' => 'info', 'channel' => 'app'],
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
 
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
@@ -200,9 +200,9 @@ class StructuredMetadataTest extends TestCase
         fwrite(STDERR, "  → Testing empty context handling...\n");
 
         $handler = $this->createHandler('');
-        $context = [];
+        $record = $this->createLogRecord([]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
 
         $this->assertIsArray($result);
         $this->assertEmpty($result);
@@ -220,11 +220,11 @@ class StructuredMetadataTest extends TestCase
         fwrite(STDERR, "  → Testing context with only labels...\n");
 
         $handler = $this->createHandler('');
-        $context = [
+        $record = $this->createLogRecord([
             'labels' => ['level' => 'info'],
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
 
         $this->assertIsArray($result);
         $this->assertEmpty($result);
@@ -243,12 +243,12 @@ class StructuredMetadataTest extends TestCase
         fwrite(STDERR, "  → Testing exact prefix match edge case...\n");
 
         $handler = $this->createHandler('meta_');
-        $context = [
+        $record = $this->createLogRecord([
             'meta_' => 'should_be_ignored',
             'meta_user_id' => 123,
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
 
         $this->assertIsArray($result);
         $this->assertArrayHasKey('user_id', $result);
@@ -268,12 +268,12 @@ class StructuredMetadataTest extends TestCase
     {
         fwrite(STDERR, "  → Testing no matching prefix scenario...\n");
         $handler = $this->createHandler('meta_');
-        $context = [
+        $record = $this->createLogRecord([
             'user_id' => 123,
             'action' => 'login',
-        ];
+        ]);
 
-        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$context]);
+        $result = $this->invokePrivateMethod($handler, 'extractStructuredMetadata', [$record]);
 
         $this->assertIsArray($result);
         $this->assertEmpty($result);
