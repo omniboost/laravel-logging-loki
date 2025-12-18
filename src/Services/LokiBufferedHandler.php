@@ -336,8 +336,8 @@ class LokiBufferedHandler
      */
     private function prepareLogEntry(LogRecord $record): LokiLogEntry
     {
-        // Extract structured metadata from context based on prefix configuration
-        $structuredMetadata = $this->extractStructuredMetadata($record->context);
+        // Extract structured metadata from the record based on prefix configuration
+        $structuredMetadata = $this->extractStructuredMetadata($record);
 
         $logEntry = new LokiLogEntry(
             // Labels will be set later
@@ -356,8 +356,8 @@ class LokiBufferedHandler
         // Start with default labels
         $labels = array_merge($this->defaultLabels);
 
-        // Extract and merge labels from context based on prefix configuration
-        $contextLabels = $this->extractLabels($record->context);
+        // Extract and merge labels from log record based on prefix configuration
+        $contextLabels = $this->extractLabels($record);
         $labels = array_merge($labels, $contextLabels);
 
         // Overwrite labels
@@ -372,8 +372,11 @@ class LokiBufferedHandler
      * @param array $context Log context array
      * @return array<string, string>
      */
-    private function extractStructuredMetadata(array $context): array
+    private function extractStructuredMetadata(LogRecord $record): array
     {
+        // Combine context and extra for structured metadata extraction
+        $context = array_merge($record->context, $record->extra);
+
         // If context is empty, return empty array
         if (empty($context)) {
             return [];
@@ -471,8 +474,11 @@ class LokiBufferedHandler
      * @param array $context Log context array
      * @return array<string, string>
      */
-    private function extractLabels(array $context): array
+    private function extractLabels(LogRecord $record): array
     {
+        // Use context and extra for label extraction
+        $context = array_merge($record->context, $record->extra);
+
         // If context is empty, return empty array
         if (empty($context)) {
             return [];
