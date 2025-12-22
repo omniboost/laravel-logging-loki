@@ -346,8 +346,8 @@ class LokiBufferedHandler
             // Use formatted message if available, else raw message
             ($record->formatted ?? $record->message),
 
-            // Timestamp in nanoseconds
-            (string)($record->datetime->getTimestamp() * 1000000000),
+            // Timestamp in nanoseconds (Unix timestamp seconds concatenated with microseconds, then * 1000)
+            (string)($record->datetime->format('Uu') * 1000),
 
             // Structured metadata
             $structuredMetadata
@@ -391,12 +391,12 @@ class LokiBufferedHandler
                 if ($key === 'labels') {
                     return false;
                 }
-                
+
                 // Exclude fields matching the labels prefix (if configured)
                 if (!empty($this->labelsPrefix) && str_starts_with($key, $this->labelsPrefix)) {
                     return false;
                 }
-                
+
                 return true;
             },
             ARRAY_FILTER_USE_KEY
