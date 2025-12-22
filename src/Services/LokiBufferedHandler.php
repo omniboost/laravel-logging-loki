@@ -346,7 +346,7 @@ class LokiBufferedHandler
             // Use formatted message if available, else raw message
             ($record->formatted ?? $record->message),
 
-            // Timestamp in microseconds to nanoseconds
+            // Timestamp in nanoseconds (Unix timestamp seconds concatenated with microseconds, then * 1000)
             (string)($record->datetime->format('Uu') * 1000),
 
             // Structured metadata
