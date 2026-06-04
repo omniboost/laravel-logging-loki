@@ -78,10 +78,12 @@ class SendLogsToLoki implements ShouldQueue
         // Batch logs by labels into streams (already done, just pass through)
         $streams = $this->prepareStreams($this->entries);
 
-        Log::channel('single')->debug('SendLogsToLoki job sending logs to Loki', [
-            'streams' => json_encode($streams),
-            'url' => $this->url,
-        ]);
+        if (config('loki.debug', false)) {
+            Log::channel('single')->debug('SendLogsToLoki job sending logs to Loki', [
+                'streams' => json_encode($streams),
+                'url' => $this->url,
+            ]);
+        }
 
         // Send to Loki
         $success = $client->push($streams);
