@@ -59,6 +59,11 @@ jobs:
             dependencies-laravel-${{ matrix.laravel }}-php-${{ matrix.php }}-composer-
       
       - name: Install dependencies
+        # Composer 2.9+ blocks installing packages flagged by security
+        # advisories by default. This is a compatibility test matrix against
+        # the framework itself, so allow those versions to resolve.
+        env:
+          COMPOSER_NO_SECURITY_BLOCKING: 1
         run: |
           composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
           composer update --prefer-dist --no-interaction --no-progress
