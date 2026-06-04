@@ -78,10 +78,12 @@ class SendLogsToLoki implements ShouldQueue
         // Batch logs by labels into streams (already done, just pass through)
         $streams = $this->prepareStreams($this->entries);
 
-        Log::channel('single')->debug('SendLogsToLoki job sending logs to Loki', [
-            'streams' => json_encode($streams),
-            'url' => $this->url,
-        ]);
+        if (config('loki.debug', false)) {
+            Log::channel(config('loki.debug_channel'))->debug('SendLogsToLoki job sending logs to Loki', [
+                'streams' => json_encode($streams),
+                'url' => $this->url,
+            ]);
+        }
 
         // Send to Loki
         $success = $client->push($streams);
@@ -99,12 +101,12 @@ class SendLogsToLoki implements ShouldQueue
     {
         // Log failure if debug is enabled
         if (config('loki.debug', false)) {
-            $streamCount = count($this->payload['streams'] ?? []);
-            $totalEntries = array_sum(array_map(fn($s) => count($s['values'] ?? []), $this->payload['streams'] ?? []));
+            $streams = $this->prepareStreams($this->entries);
+            $totalEntries = count($this->entries);
 
-            Log::channel('single')->error('SendLogsToLoki job failed', [
+            Log::channel(config('loki.debug_channel'))->error('SendLogsToLoki job failed', [
                 'error' => $exception->getMessage(),
-                'stream_count' => $streamCount,
+                'stream_count' => count($streams),
                 'total_entries' => $totalEntries,
                 'url' => $this->url,
             ]);

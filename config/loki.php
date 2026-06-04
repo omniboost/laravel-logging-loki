@@ -97,6 +97,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Debug Log Channel
+    |--------------------------------------------------------------------------
+    |
+    | The log channel used for the package's own diagnostic messages (only
+    | emitted when debug mode is enabled above).
+    |
+    | Leave this null to use your application's default log channel
+    | (config 'logging.default' / the LOG_CHANNEL env var).
+    |
+    | IMPORTANT: do not point this at the Loki channel itself. Doing so would
+    | feed the package's diagnostics back into the Loki buffer, dispatching
+    | further jobs and creating an infinite loop. If your default channel is
+    | (or stacks) the Loki driver, set this to a loop-safe channel such as
+    | 'single', 'daily', or 'stderr'.
+    |
+    */
+    'debug_channel' => env('LOKI_DEBUG_CHANNEL'),
+
+    /*
+    |--------------------------------------------------------------------------
     | GZIP Compression
     |--------------------------------------------------------------------------
     |

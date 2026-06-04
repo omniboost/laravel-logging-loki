@@ -86,7 +86,7 @@ class LokiClient
         } catch (GuzzleException $e) {
             // Log the error but don't throw - logging should be resilient
             if (config('loki.debug', false)) {
-                Log::channel('single')->error('Failed to push logs to Loki', [
+                Log::channel(config('loki.debug_channel'))->error('Failed to push logs to Loki', [
                     'error' => $e->getMessage(),
                     'url' => $this->url,
                 ]);
