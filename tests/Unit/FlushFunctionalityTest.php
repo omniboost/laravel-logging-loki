@@ -10,6 +10,7 @@ use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedLogger;
 use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
 use Orchestra\Testbench\TestCase;
 use Omniboost\LaravelLoggingLoki\LokiServiceProvider;
+use Omniboost\LaravelLoggingLoki\Support\ShutdownFlusher;
 use ReflectionClass;
 
 /**
@@ -375,13 +376,7 @@ class FlushFunctionalityTest extends TestCase
         // Create a handler (which should register shutdown function)
         $handler = $this->createHandler();
 
-        // Check static property for shutdown registration
-        $reflection = new ReflectionClass(LokiBufferedHandler::class);
-        $property = $reflection->getProperty('shutdownRegistered');
-        $property->setAccessible(true);
-        $isRegistered = $property->getValue();
-
-        $this->assertTrue($isRegistered);
+        $this->assertTrue(ShutdownFlusher::isShutdownRegistered());
 
         fwrite(STDERR, "    ✓ Shutdown handler is registered\n");
     }
@@ -394,17 +389,13 @@ class FlushFunctionalityTest extends TestCase
         fwrite(STDERR, "  → Testing handler instance tracking...\n");
 
         // Get initial instance count
-        $reflection = new ReflectionClass(LokiBufferedHandler::class);
-        $property = $reflection->getProperty('handlerInstances');
-        $property->setAccessible(true);
-        $initialCount = count($property->getValue());
+        $initialCount = ShutdownFlusher::registeredHandlerCount();
 
         // Create a new handler
         $handler = $this->createHandler();
 
         // Check instances increased
-        $newCount = count($property->getValue());
-        $this->assertGreaterThan($initialCount, $newCount);
+        $this->assertGreaterThan($initialCount, ShutdownFlusher::registeredHandlerCount());
 
         fwrite(STDERR, "    ✓ Handler instances tracked correctly\n");
     }

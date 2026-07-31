@@ -7,6 +7,7 @@ use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
 use Omniboost\LaravelLoggingLoki\LokiServiceProvider;
+use Omniboost\LaravelLoggingLoki\Support\ShutdownFlusher;
 use Orchestra\Testbench\TestCase;
 use ReflectionClass;
 use DateTime;
@@ -27,26 +28,12 @@ class StructuredMetadataTest extends TestCase
 
     protected function tearDown(): void
     {
-        // Manually flush all handler instances while Laravel container is still available
-        // This prevents shutdown handler from running after Laravel is torn down
-        $reflection = new ReflectionClass(LokiBufferedHandler::class);
-        $instancesProperty = $reflection->getProperty('handlerInstances');
-        $instancesProperty->setAccessible(true);
-        $instances = $instancesProperty->getValue();
-        
-        foreach ($instances as $handler) {
-            if ($handler instanceof LokiBufferedHandler) {
-                try {
-                    $handler->flushMemoryBuffer();
-                } catch (\Throwable $e) {
-                    // Ignore flush errors during teardown - handler might try to send logs to Loki
-                }
-            }
-        }
-        
-        // Clear the instances array to prevent shutdown handler from running
-        $instancesProperty->setValue(null, []);
-        
+        // Flush all handler instances while the application is still available.
+        // Anything left behind is skipped by the shutdown flusher rather than
+        // failing, since it no longer touches the container once the application
+        // is gone.
+        ShutdownFlusher::flushAll();
+
         parent::tearDown();
     }
 

@@ -4,21 +4,24 @@ namespace Omniboost\LaravelLoggingLoki\Tests\Unit;
 
 use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Facade;
+use Illuminate\Support\Facades\Queue;
+use Monolog\DateTimeImmutable;
 use Monolog\Level;
 use Monolog\LogRecord;
+use Omniboost\LaravelLoggingLoki\Jobs\SendLogsToLoki;
 use Omniboost\LaravelLoggingLoki\LokiServiceProvider;
 use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
+use Omniboost\LaravelLoggingLoki\Support\ShutdownFlusher;
 use Orchestra\Testbench\TestCase;
-use ReflectionClass;
 use WeakReference;
 
 /**
  * Unit Tests for Shutdown Flushing
  *
- * The handler registers a shutdown function that flushes the memory buffer of
- * every instance it created. That callback runs after the application has
- * terminated, so these tests cover what happens when the container it needs is
- * no longer usable, and make sure the instance registry does not retain handlers.
+ * ShutdownFlusher flushes the memory buffer of every live handler when the
+ * process ends. That callback runs after the application has terminated, so
+ * these tests cover what happens when the container it needs is no longer
+ * usable, and make sure the instance registry does not retain handlers.
  */
 class ShutdownFlushTest extends TestCase
 {
@@ -26,15 +29,6 @@ class ShutdownFlushTest extends TestCase
     {
         parent::setUp();
         fwrite(STDERR, "\n");
-
-        $this->clearHandlerInstances();
-    }
-
-    protected function tearDown(): void
-    {
-        $this->clearHandlerInstances();
-
-        parent::tearDown();
     }
 
     /**
@@ -56,28 +50,32 @@ class ShutdownFlushTest extends TestCase
     }
 
     /**
-     * Test: flushing without an application does not throw
+     * Test: flushing without an application does not throw and keeps the buffer
      *
      * Regression test: the shutdown function used to call into the container
      * after the application had been flushed, which threw "Target class [config]
      * does not exist" and wrote one error log line per handler instance.
      */
-    public function testFlushMemoryBufferIsANoOpWithoutAnApplication()
+    public function testShutdownFlushWithoutAnApplicationKeepsTheBuffer()
     {
-        fwrite(STDERR, "  → Testing flushMemoryBuffer() without an application...\n");
+        fwrite(STDERR, "  → Testing shutdown flush without an application...\n");
+
+        Queue::fake();
 
         $handler = $this->createHandler();
         $handler->write($this->createRecord('buffered before teardown'));
 
-        $this->assertCount(1, $this->getMemoryBuffer($handler));
-
-        $this->withoutApplication(function () use ($handler) {
-            LokiBufferedHandler::flushAllMemoryBuffers();
+        $this->withoutApplication(static function () {
+            ShutdownFlusher::flushAll();
         });
 
-        // The buffer is kept: it could not be written anywhere, so dropping it
-        // would lose logs that a later flush (with a live application) can still send
-        $this->assertCount(1, $this->getMemoryBuffer($handler));
+        Queue::assertNothingPushed();
+
+        // The buffer was kept rather than dropped, so it can still be flushed
+        // once an application is available again
+        $handler->flushMemoryBuffer();
+
+        Queue::assertPushed(SendLogsToLoki::class);
 
         fwrite(STDERR, "    ✓ Shutdown flush without an application is a no-op\n");
     }
@@ -85,17 +83,19 @@ class ShutdownFlushTest extends TestCase
     /**
      * Test: flush() without an application does not throw either
      */
-    public function testFlushIsANoOpWithoutAnApplication()
+    public function testCacheFlushWithoutAnApplicationIsANoOp()
     {
         fwrite(STDERR, "  → Testing flush() without an application...\n");
 
+        Queue::fake();
+
         $handler = $this->createHandler();
 
-        $this->withoutApplication(function () use ($handler) {
+        $this->withoutApplication(static function () use ($handler) {
             $handler->flush();
         });
 
-        $this->assertTrue(true);
+        Queue::assertNothingPushed();
 
         fwrite(STDERR, "    ✓ Cache flush without an application is a no-op\n");
     }
@@ -107,39 +107,23 @@ class ShutdownFlushTest extends TestCase
      * builds handlers repeatedly (queue workers, Octane, test suites) leaked all
      * of them and flushed all of them at shutdown.
      */
-    public function testInstanceRegistryDoesNotRetainHandlers()
+    public function testRegistryDoesNotRetainHandlers()
     {
         fwrite(STDERR, "  → Testing handler instances are weakly referenced...\n");
 
         $handler = $this->createHandler();
         $reference = WeakReference::create($handler);
 
-        $this->assertNotEmpty($this->getHandlerInstances());
-
         unset($handler);
 
         $this->assertNull($reference->get(), 'The registry is keeping the handler alive');
 
+        // Collected handlers are pruned instead of tripping over a dead reference
+        ShutdownFlusher::flushAll();
+
+        $this->assertNull($reference->get());
+
         fwrite(STDERR, "    ✓ Handlers are released once the application drops them\n");
-    }
-
-    /**
-     * Test: dead instances are pruned from the registry on flush
-     */
-    public function testDeadInstancesArePrunedFromTheRegistry()
-    {
-        fwrite(STDERR, "  → Testing dead instances are pruned...\n");
-
-        $handler = $this->createHandler();
-        unset($handler);
-
-        $this->assertCount(1, $this->getHandlerInstances());
-
-        LokiBufferedHandler::flushAllMemoryBuffers();
-
-        $this->assertCount(0, $this->getHandlerInstances());
-
-        fwrite(STDERR, "    ✓ Garbage collected handlers are dropped from the registry\n");
     }
 
     /**
@@ -177,41 +161,12 @@ class ShutdownFlushTest extends TestCase
     private function createRecord(string $message): LogRecord
     {
         return new LogRecord(
-            datetime: new \Monolog\DateTimeImmutable(true),
+            datetime: new DateTimeImmutable(true),
             channel: 'test',
             level: Level::Info,
             message: $message,
             context: [],
             extra: []
         );
-    }
-
-    /**
-     * @return array<int, mixed>
-     */
-    private function getMemoryBuffer(LokiBufferedHandler $handler): array
-    {
-        $property = (new ReflectionClass(LokiBufferedHandler::class))->getProperty('memoryBuffer');
-        $property->setAccessible(true);
-
-        return $property->getValue($handler);
-    }
-
-    /**
-     * @return array<int, mixed>
-     */
-    private function getHandlerInstances(): array
-    {
-        $property = (new ReflectionClass(LokiBufferedHandler::class))->getProperty('handlerInstances');
-        $property->setAccessible(true);
-
-        return $property->getValue();
-    }
-
-    private function clearHandlerInstances(): void
-    {
-        $property = (new ReflectionClass(LokiBufferedHandler::class))->getProperty('handlerInstances');
-        $property->setAccessible(true);
-        $property->setValue(null, []);
     }
 }
