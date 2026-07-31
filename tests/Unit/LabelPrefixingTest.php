@@ -7,7 +7,6 @@ use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
 use Omniboost\LaravelLoggingLoki\LokiServiceProvider;
-use Omniboost\LaravelLoggingLoki\Support\ShutdownFlusher;
 use Orchestra\Testbench\TestCase;
 use ReflectionClass;
 use DateTime;
@@ -24,17 +23,6 @@ class LabelPrefixingTest extends TestCase
     {
         parent::setUp();
         fwrite(STDERR, "\n");
-    }
-
-    protected function tearDown(): void
-    {
-        // Flush all handler instances while the application is still available.
-        // Anything left behind is skipped by the shutdown flusher rather than
-        // failing, since it no longer touches the container once the application
-        // is gone.
-        ShutdownFlusher::flushAll();
-
-        parent::tearDown();
     }
 
     /**
