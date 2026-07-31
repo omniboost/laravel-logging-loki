@@ -11,10 +11,6 @@ class LokiBufferedLogger extends AbstractProcessingHandler
     // Logger handler
     private ?LokiBufferedHandler $handler = null;
 
-    // Static registry for shutdown handlers
-    private static bool $shutdownRegistered = false;
-    private static array $handlerInstances = [];
-
     /**
      * @param string $url Loki URL
      * @param int $level The minimum logging level
@@ -31,22 +27,12 @@ class LokiBufferedLogger extends AbstractProcessingHandler
         parent::__construct($level, $bubble);
 
         // Create handler
+        //
+        // No shutdown handling is registered here: LokiBufferedHandler already
+        // registers every instance it creates. Doing it here as well flushes the
+        // same buffers twice and keeps every logger ever built alive for the
+        // lifetime of the process.
         $this->handler = $handler;
-
-        // Register this instance for shutdown handling
-        self::$handlerInstances[] = $this;
-
-        // Register shutdown function once per process to flush all handler instances
-        if (!self::$shutdownRegistered) {
-            register_shutdown_function(function () {
-                foreach (self::$handlerInstances as $handler) {
-                    if ($handler instanceof self) {
-                        $handler->getHandler()->flushMemoryBuffer();
-                    }
-                }
-            });
-            self::$shutdownRegistered = true;
-        }
     }
 
     /**

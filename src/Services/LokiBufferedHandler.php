@@ -7,6 +7,7 @@ use Omniboost\LaravelLoggingLoki\Jobs\SendLogsToLoki;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
+use Omniboost\LaravelLoggingLoki\Support\ShutdownFlusher;
 
 class LokiBufferedHandler
 {
@@ -30,10 +31,6 @@ class LokiBufferedHandler
     private int $memoryBufferSize;
     private float $memoryFlushInterval;
     private float $memoryBufferLastFlush;
-
-    // Static registry for shutdown handlers
-    private static bool $shutdownRegistered = false;
-    private static array $handlerInstances = [];
 
     /**
      * @param string $url Loki URL
@@ -88,20 +85,8 @@ class LokiBufferedHandler
 
         $this->memoryBufferLastFlush = microtime(true);
 
-        // Register this instance for shutdown handling
-        self::$handlerInstances[] = $this;
-
-        // Register shutdown function once per process to flush all handler instances
-        if (!self::$shutdownRegistered) {
-            register_shutdown_function(function () {
-                foreach (self::$handlerInstances as $handler) {
-                    if ($handler instanceof self) {
-                        $handler->flushMemoryBuffer();
-                    }
-                }
-            });
-            self::$shutdownRegistered = true;
-        }
+        // Register this instance so its memory buffer is flushed at shutdown
+        ShutdownFlusher::register($this);
     }
 
     /**
@@ -164,6 +149,12 @@ class LokiBufferedHandler
     public function flushMemoryBuffer(): void
     {
         if (empty($this->memoryBuffer)) {
+            return;
+        }
+
+        // Nothing can be written without the container, and the buffer is kept so a
+        // later call (with a live application) can still flush it
+        if (!ShutdownFlusher::applicationIsAvailable()) {
             return;
         }
 
@@ -561,6 +552,11 @@ class LokiBufferedHandler
      */
     public function flush(): void
     {
+        // Cache, Redis and the queue all come from the container
+        if (!ShutdownFlusher::applicationIsAvailable()) {
+            return;
+        }
+
         if ($this->isRedisAvailable()) {
             // Flush via Redis
             $this->flushRedis();
