@@ -140,9 +140,11 @@ class FlushFunctionalityTest extends TestCase
         fwrite(STDERR, "  → Testing LokiBufferedLogger::flush() delegates to handler...\n");
 
         // Create mock handler
+        // flushMemoryBuffer() is called twice: once by flush() and once by the
+        // logger's destructor when $logger goes out of scope at the end of the test
         $mockHandler = Mockery::mock(LokiBufferedHandler::class);
         $mockHandler->shouldReceive('flushMemoryBuffer')
-            ->once()
+            ->twice()
             ->andReturnNull();
         $mockHandler->shouldReceive('flush')
             ->once()
@@ -278,9 +280,11 @@ class FlushFunctionalityTest extends TestCase
         fwrite(STDERR, "  → Testing LokiBufferedLogger::close() method...\n");
 
         // Create mock handler that expects flush calls
+        // flushMemoryBuffer() is called twice: once by close() and once by the
+        // logger's destructor when $logger goes out of scope at the end of the test
         $mockHandler = Mockery::mock(LokiBufferedHandler::class);
         $mockHandler->shouldReceive('flushMemoryBuffer')
-            ->once()
+            ->twice()
             ->andReturnNull();
         $mockHandler->shouldReceive('flush')
             ->once()

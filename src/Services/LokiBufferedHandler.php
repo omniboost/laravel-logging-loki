@@ -5,8 +5,11 @@ namespace Omniboost\LaravelLoggingLoki\Services;
 use Monolog\LogRecord;
 use Omniboost\LaravelLoggingLoki\Jobs\SendLogsToLoki;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
+use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Redis;
+use WeakReference;
 
 class LokiBufferedHandler
 {
@@ -32,7 +35,14 @@ class LokiBufferedHandler
     private float $memoryBufferLastFlush;
 
     // Static registry for shutdown handlers
+    //
+    // Instances are held as weak references keyed by object id: the registry must
+    // not be what keeps a handler alive. Holding strong references leaks every
+    // handler ever built for the lifetime of the process, which adds up fast in
+    // long-running workers and test suites that rebuild the application per test.
     private static bool $shutdownRegistered = false;
+
+    /** @var array<int, WeakReference<self>> */
     private static array $handlerInstances = [];
 
     /**
@@ -89,19 +99,63 @@ class LokiBufferedHandler
         $this->memoryBufferLastFlush = microtime(true);
 
         // Register this instance for shutdown handling
-        self::$handlerInstances[] = $this;
+        self::$handlerInstances[spl_object_id($this)] = WeakReference::create($this);
 
         // Register shutdown function once per process to flush all handler instances
         if (!self::$shutdownRegistered) {
-            register_shutdown_function(function () {
-                foreach (self::$handlerInstances as $handler) {
-                    if ($handler instanceof self) {
-                        $handler->flushMemoryBuffer();
-                    }
-                }
+            register_shutdown_function(static function () {
+                self::flushAllMemoryBuffers();
             });
             self::$shutdownRegistered = true;
         }
+    }
+
+    /**
+     * Flush the memory buffer of every handler still alive in this process
+     *
+     * Called from the shutdown function registered by the constructor. Handlers
+     * that have already been garbage collected are dropped from the registry.
+     *
+     * @return void
+     */
+    public static function flushAllMemoryBuffers(): void
+    {
+        foreach (self::$handlerInstances as $id => $reference) {
+            $handler = $reference->get();
+
+            if ($handler === null) {
+                // The handler is gone; stop tracking it
+                unset(self::$handlerInstances[$id]);
+                continue;
+            }
+
+            $handler->flushMemoryBuffer();
+        }
+    }
+
+    /**
+     * Check whether the Laravel application is still usable
+     *
+     * Flushing reaches into the container (config, cache, queue), so it can only
+     * run while an application with those bindings is available. That is not a
+     * given for the callers that run late in the process lifecycle:
+     *
+     * - the shutdown function runs after the application has terminated, and in
+     *   test suites or Octane-style workers the container has been flushed (or
+     *   replaced) by then;
+     * - the destructor can run at any point during shutdown for the same reason.
+     *
+     * Without this check every such call throws "Target class [config] does not
+     * exist", which is caught in flushMemoryBuffer() and written to the error log
+     * once per handler instance - noise that hides real flush failures.
+     */
+    private static function applicationIsAvailable(): bool
+    {
+        if (Facade::getFacadeApplication() === null) {
+            return false;
+        }
+
+        return Container::getInstance()->bound('config');
     }
 
     /**
@@ -164,6 +218,12 @@ class LokiBufferedHandler
     public function flushMemoryBuffer(): void
     {
         if (empty($this->memoryBuffer)) {
+            return;
+        }
+
+        // Nothing can be written without the container, and the buffer is kept so a
+        // later call (with a live application) can still flush it
+        if (!self::applicationIsAvailable()) {
             return;
         }
 
@@ -561,6 +621,11 @@ class LokiBufferedHandler
      */
     public function flush(): void
     {
+        // Cache, Redis and the queue all come from the container
+        if (!self::applicationIsAvailable()) {
+            return;
+        }
+
         if ($this->isRedisAvailable()) {
             // Flush via Redis
             $this->flushRedis();
