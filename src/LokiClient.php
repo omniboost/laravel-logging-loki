@@ -4,7 +4,7 @@ namespace Omniboost\LaravelLoggingLoki;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
-use Illuminate\Support\Facades\Log;
+use GuzzleHttp\Exception\RequestException;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiPayload;
 
 class LokiClient
@@ -29,10 +29,16 @@ class LokiClient
     }
 
     /**
-     * Push logs to Loki
+     * Push logs to Loki.
      *
-     * @param array<LokiStream> $streams Array of log streams in Loki format
-     * @return bool
+     * @param array<\Omniboost\LaravelLoggingLoki\DTOs\LokiStream> $streams Array of log streams in Loki format
+     * @return bool true when Loki acknowledged the push (HTTP 204)
+     *
+     * @throws \RuntimeException with the real reason when the push fails — the
+     *         HTTP status and response body for a rejected request (auth, bad
+     *         request, rate limit, ...), or the transport error when Loki could
+     *         not be reached. The caller (the queue job) lets this propagate so
+     *         the failure is retried and recorded instead of silently dropped.
      */
     public function push(array $streams): bool
     {
@@ -40,58 +46,70 @@ class LokiClient
             return true;
         }
 
-        $payload = [
-            'streams' => $streams,
+        $jsonPayload = json_encode(['streams' => $streams]);
+
+        if ($jsonPayload === false) {
+            throw new \RuntimeException('Failed to encode payload to JSON');
+        }
+
+        $options = [
+            'headers' => [
+                'Content-Type' => 'application/json',
+            ],
         ];
 
-        try {
-            // Encode payload to JSON
-            $jsonPayload = json_encode($payload);
-            
-            if ($jsonPayload === false) {
-                throw new \RuntimeException('Failed to encode payload to JSON');
+        // Apply GZIP compression if enabled
+        if ($this->gzipCompression) {
+            $compressedPayload = gzencode($jsonPayload);
+
+            if ($compressedPayload === false) {
+                throw new \RuntimeException('Failed to compress payload');
             }
 
-            $options = [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-            ];
-
-            // Apply GZIP compression if enabled
-            if ($this->gzipCompression) {
-                $compressedPayload = gzencode($jsonPayload);
-                
-                if ($compressedPayload === false) {
-                    throw new \RuntimeException('Failed to compress payload');
-                }
-                
-                $options['body'] = $compressedPayload;
-                $options['headers']['Content-Encoding'] = 'gzip';
-            } else {
-                $options['body'] = $jsonPayload;
-            }
-
-            // Add basic auth if credentials are provided
-            if ($this->username && $this->password) {
-                $options['auth'] = [$this->username, $this->password];
-            }
-
-            $response = $this->httpClient->post(
-                $this->url . '/loki/api/v1/push',
-                $options
-            );
-
-            return $response->getStatusCode() === 204;
-        } catch (GuzzleException $e) {
-            // Log the error but don't throw - logging should be resilient
-            if (config('loki.debug', false)) {
-                Log::channel(config('loki.debug_channel'))->error('Failed to push logs to Loki', [
-                    'error' => $e->getMessage(),
-                    'url' => $this->url,
-                ]);
-            }
-            return false;
+            $options['body'] = $compressedPayload;
+            $options['headers']['Content-Encoding'] = 'gzip';
+        } else {
+            $options['body'] = $jsonPayload;
         }
+
+        // Add basic auth if credentials are provided
+        if ($this->username && $this->password) {
+            $options['auth'] = [$this->username, $this->password];
+        }
+
+        try {
+            $response = $this->httpClient->post($this->url . '/loki/api/v1/push', $options);
+        } catch (RequestException $e) {
+            // Loki returned an error status (401, 404, 429, 5xx, ...). Surface the
+            // status and body it sent back rather than a generic failure.
+            if ($e->getResponse() !== null) {
+                throw new \RuntimeException(sprintf(
+                    'Loki rejected the push with HTTP %d: %s',
+                    $e->getResponse()->getStatusCode(),
+                    trim((string) $e->getResponse()->getBody())
+                ), 0, $e);
+            }
+
+            throw new \RuntimeException('Could not reach Loki at ' . $this->url . ': ' . $e->getMessage(), 0, $e);
+        } catch (GuzzleException $e) {
+            // Connection/timeout/DNS failure — there is no response to report.
+            throw new \RuntimeException('Could not reach Loki at ' . $this->url . ': ' . $e->getMessage(), 0, $e);
+        }
+
+        // Guzzle's http_errors only throws on 4xx/5xx, so a response reaching here
+        // still has to be checked: Loki acknowledges a push with 204 (200 from
+        // some proxies). Anything else is not an acknowledgement, so fail loudly
+        // and let the job's retry/error path handle it instead of dropping logs.
+        $statusCode = $response->getStatusCode();
+
+        if ($statusCode !== 204 && $statusCode !== 200) {
+            throw new \RuntimeException(sprintf(
+                'Loki rejected the push with HTTP %d: %s',
+                $statusCode,
+                trim((string) $response->getBody())
+            ));
+        }
+
+        return true;
     }
 }

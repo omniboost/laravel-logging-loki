@@ -85,13 +85,10 @@ class SendLogsToLoki implements ShouldQueue
             ]);
         }
 
-        // Send to Loki
-        $success = $client->push($streams);
-
-        if (!$success && $this->attempts() < $this->tries) {
-            // Re-throw to trigger retry
-            throw new \RuntimeException('Failed to send logs to Loki');
-        }
+        // Send to Loki. push() throws a descriptive exception on failure (the
+        // HTTP status + body, or the connection error); let it propagate so the
+        // queue retries (per $tries) and the real reason is recorded.
+        $client->push($streams);
     }
 
     /**
