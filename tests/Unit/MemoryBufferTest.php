@@ -485,7 +485,16 @@ class MemoryBufferTest extends TestCase
             // Expected - the sync queue runs the job inline, which tries to reach
             // Loki and fails in the test environment ("Could not reach Loki ..."
             // or "Loki rejected the push ...").
-            if (!str_contains($e->getMessage(), 'Loki')) {
+            $expectedPrefixes = ['Could not reach Loki at ', 'Loki rejected the push with HTTP '];
+            $isExpected = false;
+            foreach ($expectedPrefixes as $prefix) {
+                if (str_starts_with($e->getMessage(), $prefix)) {
+                    $isExpected = true;
+                    break;
+                }
+            }
+
+            if (!$isExpected) {
                 throw $e; // Re-throw if it's a different error
             }
         }
