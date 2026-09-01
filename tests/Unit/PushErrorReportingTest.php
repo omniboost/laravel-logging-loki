@@ -24,6 +24,8 @@ use Orchestra\Testbench\TestCase;
  */
 class PushErrorReportingTest extends TestCase
 {
+    private const LOKI_URL = 'http://localhost:3100';
+
     /**
      * Build a LokiClient whose HTTP client is backed by the given mock handler.
      *
@@ -32,7 +34,7 @@ class PushErrorReportingTest extends TestCase
     private function clientWithResponses(array $queue): LokiClient
     {
         $reflection = new \ReflectionClass(LokiClient::class);
-        $instance = $reflection->newInstanceArgs(['http://localhost:3100', null, null, true]);
+        $instance = $reflection->newInstanceArgs([self::LOKI_URL, null, null, true]);
 
         $httpClient = new Client(['handler' => HandlerStack::create(new MockHandler($queue))]);
         $property = $reflection->getProperty('httpClient');
@@ -92,7 +94,7 @@ class PushErrorReportingTest extends TestCase
         $client = $this->clientWithResponses([
             new \GuzzleHttp\Exception\ConnectException(
                 'cURL error 28: Connection timed out',
-                new \GuzzleHttp\Psr7\Request('POST', 'http://localhost:3100/loki/api/v1/push')
+                new \GuzzleHttp\Psr7\Request('POST', self::LOKI_URL . '/loki/api/v1/push')
             ),
         ]);
 
@@ -102,7 +104,7 @@ class PushErrorReportingTest extends TestCase
         } catch (LokiConnectionException $e) {
             $this->assertStringContainsString('Could not reach Loki', $e->getMessage());
             $this->assertStringContainsString('Connection timed out', $e->getMessage());
-            $this->assertSame('http://localhost:3100', $e->getUrl());
+            $this->assertSame(self::LOKI_URL, $e->getUrl());
         }
 
         fwrite(STDERR, "    ✓ exception names the transport error, not a response\n");

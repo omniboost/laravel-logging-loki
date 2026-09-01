@@ -24,6 +24,8 @@ use Orchestra\Testbench\TestCase;
  */
 class PushFailureRetryTest extends TestCase
 {
+    private const LOKI_URL = 'http://localhost:3100';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -49,6 +51,34 @@ class PushFailureRetryTest extends TestCase
     }
 
     /**
+     * A job that pushes through the given client instead of a real one.
+     *
+     * @param array<LokiLogEntry> $entries
+     */
+    private function jobWithClient(LokiClient $client, array $entries): SendLogsToLoki
+    {
+        $job = new class($entries, self::LOKI_URL) extends SendLogsToLoki {
+            public ?LokiClient $fakeClient = null;
+
+            protected function makeClient(): LokiClient
+            {
+                return $this->fakeClient;
+            }
+        };
+        $job->fakeClient = $client;
+
+        return $job;
+    }
+
+    /**
+     * A single log entry, enough for the job to have something to push.
+     */
+    private function anEntry(): LokiLogEntry
+    {
+        return new LokiLogEntry(['level' => 'info'], 'message', '1234567890000000000');
+    }
+
+    /**
      * A job whose push() always throws the given exception, with a fake queue
      * job instance so fail() has something to mark.
      *
@@ -59,15 +89,7 @@ class PushFailureRetryTest extends TestCase
         $client = Mockery::mock(LokiClient::class);
         $client->shouldReceive('push')->once()->andThrow($failure);
 
-        $job = new class([new LokiLogEntry(['level' => 'info'], 'message', '1234567890000000000')], 'http://localhost:3100') extends SendLogsToLoki {
-            public ?LokiClient $fakeClient = null;
-
-            protected function makeClient(): LokiClient
-            {
-                return $this->fakeClient;
-            }
-        };
-        $job->fakeClient = $client;
+        $job = $this->jobWithClient($client, [$this->anEntry()]);
 
         $queueJob = Mockery::mock(JobContract::class);
 
@@ -166,7 +188,7 @@ class PushFailureRetryTest extends TestCase
     {
         fwrite(STDERR, "  → Testing an unreachable Loki still propagates for a retry...\n");
 
-        $failure = new LokiConnectionException('http://localhost:3100', 'Could not reach Loki');
+        $failure = new LokiConnectionException(self::LOKI_URL, 'Could not reach Loki');
         [$job] = $this->jobThatFailsWith($failure, expectFail: false);
 
         try {
@@ -188,15 +210,7 @@ class PushFailureRetryTest extends TestCase
         $client = Mockery::mock(LokiClient::class);
         $client->shouldReceive('push')->once()->andThrow(new LokiResponseException(401, 'nope'));
 
-        $job = new class([new LokiLogEntry(['level' => 'info'], 'message', '1234567890000000000')], 'http://localhost:3100') extends SendLogsToLoki {
-            public ?LokiClient $fakeClient = null;
-
-            protected function makeClient(): LokiClient
-            {
-                return $this->fakeClient;
-            }
-        };
-        $job->fakeClient = $client;
+        $job = $this->jobWithClient($client, [$this->anEntry()]);
 
         $this->assertNull($job->job, 'No queue job instance is set');
 
@@ -214,15 +228,7 @@ class PushFailureRetryTest extends TestCase
         $client = Mockery::mock(LokiClient::class);
         $client->shouldReceive('push')->once()->andReturn(true);
 
-        $job = new class([new LokiLogEntry(['level' => 'info'], 'message', '1234567890000000000')], 'http://localhost:3100') extends SendLogsToLoki {
-            public ?LokiClient $fakeClient = null;
-
-            protected function makeClient(): LokiClient
-            {
-                return $this->fakeClient;
-            }
-        };
-        $job->fakeClient = $client;
+        $job = $this->jobWithClient($client, [$this->anEntry()]);
 
         $queueJob = Mockery::mock(JobContract::class);
         $queueJob->shouldNotReceive('fail');
@@ -243,15 +249,7 @@ class PushFailureRetryTest extends TestCase
         $client = Mockery::mock(LokiClient::class);
         $client->shouldNotReceive('push');
 
-        $job = new class([], 'http://localhost:3100') extends SendLogsToLoki {
-            public ?LokiClient $fakeClient = null;
-
-            protected function makeClient(): LokiClient
-            {
-                return $this->fakeClient;
-            }
-        };
-        $job->fakeClient = $client;
+        $job = $this->jobWithClient($client, []);
 
         $job->handle();
 
