@@ -7,6 +7,7 @@ use Omniboost\LaravelLoggingLoki\Jobs\SendLogsToLoki;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
+use Omniboost\LaravelLoggingLoki\Support\SelfLog;
 use Omniboost\LaravelLoggingLoki\Support\ShutdownFlusher;
 
 class LokiBufferedHandler
@@ -25,6 +26,23 @@ class LokiBufferedHandler
     private array $defaultLabels;
     private string $structuredMetadataPrefix;
     private string $labelsPrefix;
+
+    /**
+     * Is a write to Loki in progress anywhere in this process?
+     *
+     * The second line of defence against the loop SelfLog exists to prevent.
+     * Buffering a record reaches into the cache and the queue, and anything down
+     * there that logs on failure - a Redis error, a queue connection error, a
+     * package of its own - produces a record that comes straight back into
+     * write() while the first one is still being written. SelfLog covers the
+     * failures this package reports itself; this covers the ones it cannot see.
+     *
+     * Static rather than per-instance: two configured Loki channels share the
+     * same cache buffer and the same queue, so recursion through one of them is
+     * recursion for both. Also deliberately not reset by anything other than the
+     * finally below.
+     */
+    private static bool $writing = false;
 
     // In-memory buffer properties
     private array $memoryBuffer = [];
@@ -94,8 +112,28 @@ class LokiBufferedHandler
      */
     public function write(LogRecord $record): void
     {
-        $logEntry = $this->prepareLogEntry($record);
-        $this->addToMemoryBuffer($logEntry);
+        // A record produced while writing a record is dropped rather than
+        // buffered: it is a symptom of the write that is already in flight, and
+        // buffering it would grow the buffer for every failure. The error log
+        // still gets it, so nothing disappears without a trace.
+        if (self::$writing) {
+            SelfLog::write(sprintf(
+                'dropped a record emitted while writing to Loki (recursion guard): [%s] %s',
+                $record->level->getName(),
+                $record->message
+            ), level: 'warning');
+
+            return;
+        }
+
+        self::$writing = true;
+
+        try {
+            $logEntry = $this->prepareLogEntry($record);
+            $this->addToMemoryBuffer($logEntry);
+        } finally {
+            self::$writing = false;
+        }
     }
 
     /**
@@ -169,14 +207,10 @@ class LokiBufferedHandler
         try {
             $this->bufferLogs($logsToFlush);
         } catch (\Throwable $e) {
-            // Log error to PHP error log to aid debugging
-            // We can't use Laravel Log here as it might cause recursion
-            error_log(sprintf(
-                'LokiBufferedHandler: Failed to flush memory buffer: %s in %s:%d',
-                $e->getMessage(),
-                $e->getFile(),
-                $e->getLine()
-            ));
+            // Straight to the error log, not through Laravel: this runs in a
+            // destructor and at shutdown, and the application's default channel
+            // may well be the Loki channel that just failed.
+            SelfLog::write('failed to flush the memory buffer.', $e);
         }
     }
 

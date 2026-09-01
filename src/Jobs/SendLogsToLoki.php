@@ -7,13 +7,13 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Log;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiStream;
 use Omniboost\LaravelLoggingLoki\Exceptions\LokiPayloadException;
 use Omniboost\LaravelLoggingLoki\Exceptions\LokiPushException;
 use Omniboost\LaravelLoggingLoki\Exceptions\LokiResponseException;
 use Omniboost\LaravelLoggingLoki\LokiClient;
+use Omniboost\LaravelLoggingLoki\Support\SelfLog;
 use stdClass;
 
 class SendLogsToLoki implements ShouldQueue
@@ -82,7 +82,7 @@ class SendLogsToLoki implements ShouldQueue
         $streams = $this->prepareStreams($this->entries);
 
         if (config('loki.debug', false)) {
-            Log::channel(config('loki.debug_channel'))->debug('SendLogsToLoki job sending logs to Loki', [
+            SelfLog::debug('sending logs to Loki', [
                 'streams' => json_encode($streams),
                 'url' => $this->url,
             ]);
@@ -144,18 +144,22 @@ class SendLogsToLoki implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
-        // Log failure if debug is enabled
-        if (config('loki.debug', false)) {
-            $streams = $this->prepareStreams($this->entries);
-            $totalEntries = count($this->entries);
-
-            Log::channel(config('loki.debug_channel'))->error('SendLogsToLoki job failed', [
-                'exception' => get_class($exception),
-                'error' => $exception->getMessage(),
-                'stream_count' => count($streams),
-                'total_entries' => $totalEntries,
+        // Reported whether or not debug is enabled: this is the point where the
+        // logs this job carried are lost for good, which is worth a line on its
+        // own. It goes through SelfLog rather than Log so that a failed push is
+        // never reported into the buffer that failed to push.
+        //
+        // Nothing may escape this method. An exception here would be reported by
+        // the worker through Laravel's exception handler, which writes to the
+        // default channel - the Loki channel, in the setup this all exists for -
+        // so the one method that avoids the loop would be the one that causes it.
+        try {
+            SelfLog::error('push job failed; the logs it carried were dropped.', [
+                'total_entries' => count($this->entries),
                 'url' => $this->url,
-            ]);
+            ], $exception);
+        } catch (\Throwable $reportingFailure) {
+            SelfLog::write('could not report a failed push job.', $reportingFailure);
         }
     }
 

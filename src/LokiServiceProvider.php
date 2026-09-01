@@ -9,6 +9,8 @@ use Omniboost\LaravelLoggingLoki\Services\LokiBufferedHandler;
 use Omniboost\LaravelLoggingLoki\Formatters\LokiFormatter;
 use Omniboost\LaravelLoggingLoki\Logging\LokiBufferedLogger;
 use Omniboost\LaravelLoggingLoki\Commands\LokiFlushCommand;
+use Omniboost\LaravelLoggingLoki\Support\SelfLog;
+use Monolog\LogRecord;
 
 class LokiServiceProvider extends ServiceProvider
 {
@@ -60,7 +62,25 @@ class LokiServiceProvider extends ServiceProvider
                 $handler->setFormatter(new LokiFormatter());
             }
 
-            return new Logger($config['name'] ?? 'loki', [$handler]);
+            $logger = new Logger($config['name'] ?? 'loki', [$handler]);
+
+            // Without this, a handler that throws takes the caller down with it:
+            // Monolog lets the exception out of Logger::addRecord(), so it
+            // surfaces from whatever line called Log::info() - and if the caller
+            // reports it through the log, that report goes to Loki as well.
+            //
+            // Monolog's own answer to a handler that cannot write is an exception
+            // handler on the logger; ours writes to the out-of-band sink and
+            // swallows the record. Losing a log line is not worth failing a
+            // request or a job over.
+            $logger->setExceptionHandler(function (\Throwable $e, LogRecord $record): void {
+                SelfLog::error('handler failed; the record was dropped.', [
+                    'level' => $record->level->getName(),
+                    'record_message' => $record->message,
+                ], $e);
+            });
+
+            return $logger;
         });
 
         // Register commands

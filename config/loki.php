@@ -89,28 +89,39 @@ return [
     | Debug Mode
     |--------------------------------------------------------------------------
     |
-    | Enable debug mode to log Loki connection errors to your default
-    | Laravel log channel. Useful for troubleshooting.
+    | Enable debug mode to report what the package is doing - the streams it is
+    | about to send, and so on - to the diagnostics channel below. Useful for
+    | troubleshooting.
+    |
+    | Failures are reported whether or not this is enabled: a push that never
+    | arrived is not a debugging detail.
     |
     */
-    'debug' => env('LOKI_DEBUG', true),
+    'debug' => env('LOKI_DEBUG', false),
 
     /*
     |--------------------------------------------------------------------------
     | Debug Log Channel
     |--------------------------------------------------------------------------
     |
-    | The log channel used for the package's own diagnostic messages (only
-    | emitted when debug mode is enabled above).
+    | The log channel the package reports its own failures and diagnostics to.
     |
-    | Leave this null to use your application's default log channel
-    | (config 'logging.default' / the LOG_CHANNEL env var).
+    | Leave this null and everything goes to the process error log via error_log()
+    | - stderr in a container, which the log driver is already collecting. That is
+    | the safe default and needs no configuration.
     |
-    | IMPORTANT: do not point this at the Loki channel itself. Doing so would
-    | feed the package's diagnostics back into the Loki buffer, dispatching
-    | further jobs and creating an infinite loop. If your default channel is
-    | (or stacks) the Loki driver, set this to a loop-safe channel such as
-    | 'single', 'daily', or 'stderr'.
+    | Set it to a channel to get the package's diagnostics into a destination you
+    | already read. It must not resolve to the Loki driver: reporting a Loki
+    | failure into Loki buffers it, dispatches another push job, fails again and
+    | reports that the same way, so every outage amplifies itself. A channel that
+    | does resolve there - directly, or through a stack, including the one the
+    | application's default channel points at - is refused and the error log is
+    | used instead, but do not rely on that: point this at a loop-safe channel
+    | such as 'stderr', 'single' or 'daily'.
+    |
+    | Note that this is NOT the application's default channel. Defaulting to it
+    | would put the package's failures back into the Loki channel in the very
+    | setup that needs them elsewhere.
     |
     */
     'debug_channel' => env('LOKI_DEBUG_CHANNEL'),
