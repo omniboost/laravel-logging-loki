@@ -10,6 +10,9 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiStream;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiPayloadException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiPushException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiResponseException;
 use Omniboost\LaravelLoggingLoki\LokiClient;
 use stdClass;
 
@@ -73,7 +76,7 @@ class SendLogsToLoki implements ShouldQueue
         }
 
         // create client
-        $client = new LokiClient($this->url, $this->username, $this->password, $this->gzipCompression);
+        $client = $this->makeClient();
 
         // Batch logs by labels into streams (already done, just pass through)
         $streams = $this->prepareStreams($this->entries);
@@ -86,9 +89,54 @@ class SendLogsToLoki implements ShouldQueue
         }
 
         // Send to Loki. push() throws a descriptive exception on failure (the
-        // HTTP status + body, or the connection error); let it propagate so the
-        // queue retries (per $tries) and the real reason is recorded.
-        $client->push($streams);
+        // HTTP status + body, or the connection error).
+        //
+        // A transient failure — Loki unreachable, rate limited, a 5xx — is left
+        // to propagate so the queue retries it (per $tries/$backoff) and records
+        // the real reason if the retries run out.
+        //
+        // A permanent one is not worth retrying: a payload that cannot be
+        // encoded, or a rejection like 400/401/404, fails identically on every
+        // attempt. Retrying only delays the failed_jobs entry by $tries *
+        // $backoff seconds while the buffer behind it keeps growing, so fail
+        // immediately instead.
+        try {
+            $client->push($streams);
+        } catch (LokiPayloadException $e) {
+            $this->failWithoutRetrying($e);
+        } catch (LokiResponseException $e) {
+            if ($e->isRetryable()) {
+                throw $e;
+            }
+
+            $this->failWithoutRetrying($e);
+        }
+    }
+
+    /**
+     * Build the client used to push, as a seam tests can replace.
+     */
+    protected function makeClient(): LokiClient
+    {
+        return new LokiClient($this->url, $this->username, $this->password, $this->gzipCompression);
+    }
+
+    /**
+     * Mark this job failed for a failure no retry can fix.
+     *
+     * This runs failed() and drops the job without consuming the remaining
+     * attempts.
+     */
+    private function failWithoutRetrying(LokiPushException $e): void
+    {
+        // Without a queue job instance — dispatchSync, or handle() called
+        // directly — fail() has nothing to mark and would silently swallow the
+        // exception, so surface it instead.
+        if ($this->job === null) {
+            throw $e;
+        }
+
+        $this->fail($e);
     }
 
     /**
