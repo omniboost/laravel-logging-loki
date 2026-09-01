@@ -14,6 +14,7 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 - ✅ **Resilient**: Automatic retries on failure with exponential backoff
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
 - ✅ **Debug Mode**: Optional debug logging for troubleshooting
+- ✅ **Typed Exceptions**: `LokiClient::push()` reports the failures it classifies as a `LokiException`, so consumers can handle Loki push problems specifically
 
 ## Installation
 
@@ -497,6 +498,95 @@ Filter by custom labels:
 ```logql
 {app="laravel", endpoint="/api/users"}
 ```
+
+## Exception Handling
+
+The failures `LokiClient::push()` classifies — a payload it could not encode, a
+response from Loki that did not acknowledge the push, a Loki it could not reach —
+are thrown as exceptions implementing
+`Omniboost\LaravelLoggingLoki\Exceptions\LokiException`, so you can single out
+a failed push instead of catching `\Exception` or matching on messages:
+
+```php
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiException;
+
+try {
+    $client->push($streams);
+} catch (LokiException $e) {
+    // Any push failure this client classifies
+}
+```
+
+### The hierarchy
+
+| Exception | Thrown when |
+|-----------|-------------|
+| `LokiException` (interface) | Marker implemented by all of the below |
+| `LokiPushException` | Base class for any failed push |
+| `LokiPayloadException` | The payload could not be JSON-encoded or GZIP-compressed locally — nothing was sent |
+| `LokiResponseException` | Loki answered but did not acknowledge the push (401, 404, 429, 5xx, or any non-204/200) |
+| `LokiConnectionException` | Loki could not be reached at all (DNS, connection refused, TLS, timeout) |
+
+All of them extend `\RuntimeException`, so existing `catch (\RuntimeException $e)`
+code around a push keeps working.
+
+The guarantee is scoped to the `LokiClient::push()` API boundary and to those
+three cases. Other code paths in the package are not wrapped: the buffered
+handler and the shutdown flusher swallow or report their own errors rather than
+throwing, and a native error raised somewhere else — a cache or Redis driver
+failure, a `\TypeError`, an `\Error` from PHP itself — is *not* converted into a
+`LokiException`. Catch `LokiException` to handle a failed push; keep a broader
+`\Throwable` handler for everything else.
+
+### Reacting per failure type
+
+`LokiResponseException` carries the status and body Loki returned, plus
+`isRetryable()` (true for 429 and 5xx). `LokiConnectionException` exposes the URL
+it tried:
+
+```php
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiConnectionException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiPayloadException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiResponseException;
+
+try {
+    $client->push($streams);
+} catch (LokiResponseException $e) {
+    if ($e->getStatusCode() === 429) {
+        // Rate limited — back off
+    } elseif ($e->getStatusCode() === 401) {
+        // Credentials are wrong — alert, retrying will not help
+    }
+
+    // Not report() or Log::error(): when the default channel includes
+    // omniboost:loki, reporting a failed push feeds it back into Loki.
+    error_log($e->getResponseBody());
+} catch (LokiConnectionException $e) {
+    // Loki is unreachable at $e->getUrl()
+} catch (LokiPayloadException $e) {
+    // A log line could not be encoded — retrying the same payload will fail again
+}
+```
+
+The original Guzzle exception, when there is one, is available through
+`$e->getPrevious()`.
+
+### In the queue job
+
+`SendLogsToLoki` decides whether a failed push is worth retrying, using the same
+distinction `isRetryable()` makes:
+
+- **Transient** — Loki unreachable, a 429, a 5xx — the exception propagates, so
+  the queue retries the push (3 tries, 10s backoff) and records the real reason
+  in `failed_jobs` if the retries run out.
+- **Permanent** — a payload that could not be encoded, or a rejection like 400,
+  401 or 404 — the job is failed immediately. Every attempt would hit the same
+  rejection, and retrying would only delay the `failed_jobs` entry by
+  `tries × backoff` seconds while the buffer behind it keeps growing.
+
+Either way the job's `failed()` handler runs, so the failure is reported. To
+handle these centrally, match on the exception class in your application's
+exception handler or in a queue `JobFailed` listener.
 
 ## Troubleshooting
 
