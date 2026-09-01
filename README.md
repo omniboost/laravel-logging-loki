@@ -502,8 +502,8 @@ Filter by custom labels:
 ## Exception Handling
 
 The failures `LokiClient::push()` classifies — a payload it could not encode, a
-response Loki did not acknowledge with, a Loki it could not reach — are thrown as
-exceptions implementing
+response from Loki that did not acknowledge the push, a Loki it could not reach —
+are thrown as exceptions implementing
 `Omniboost\LaravelLoggingLoki\Exceptions\LokiException`, so you can single out
 a failed push instead of catching `\Exception` or matching on messages:
 
@@ -558,7 +558,9 @@ try {
         // Credentials are wrong — alert, retrying will not help
     }
 
-    report($e->getResponseBody());
+    // Not report() or Log::error(): when the default channel includes
+    // omniboost:loki, reporting a failed push feeds it back into Loki.
+    error_log($e->getResponseBody());
 } catch (LokiConnectionException $e) {
     // Loki is unreachable at $e->getUrl()
 } catch (LokiPayloadException $e) {
