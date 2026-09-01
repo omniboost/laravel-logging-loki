@@ -4,6 +4,7 @@ namespace Omniboost\LaravelLoggingLoki\Tests\Unit;
 
 use Illuminate\Contracts\Queue\Job as JobContract;
 use Mockery;
+use Mockery\MockInterface;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiLogEntry;
 use Omniboost\LaravelLoggingLoki\Exceptions\LokiConnectionException;
 use Omniboost\LaravelLoggingLoki\Exceptions\LokiPayloadException;
@@ -53,6 +54,7 @@ class PushFailureRetryTest extends TestCase
     /**
      * A job that pushes through the given client instead of a real one.
      *
+     * @param LokiClient&MockInterface $client
      * @param array<LokiLogEntry> $entries
      */
     private function jobWithClient(LokiClient $client, array $entries): SendLogsToLoki
@@ -82,15 +84,17 @@ class PushFailureRetryTest extends TestCase
      * A job whose push() always throws the given exception, with a fake queue
      * job instance so fail() has something to mark.
      *
-     * @return array{0: SendLogsToLoki, 1: \Mockery\MockInterface}
+     * @return array{0: SendLogsToLoki, 1: JobContract&MockInterface}
      */
     private function jobThatFailsWith(\Throwable $failure, bool $expectFail): array
     {
+        /** @var LokiClient&MockInterface $client */
         $client = Mockery::mock(LokiClient::class);
         $client->shouldReceive('push')->once()->andThrow($failure);
 
         $job = $this->jobWithClient($client, [$this->anEntry()]);
 
+        /** @var JobContract&MockInterface $queueJob */
         $queueJob = Mockery::mock(JobContract::class);
 
         if ($expectFail) {
@@ -207,6 +211,7 @@ class PushFailureRetryTest extends TestCase
 
         // dispatchSync, or handle() called directly: there is no job instance to
         // mark failed, and fail() would silently swallow the exception.
+        /** @var LokiClient&MockInterface $client */
         $client = Mockery::mock(LokiClient::class);
         $client->shouldReceive('push')->once()->andThrow(new LokiResponseException(401, 'nope'));
 
@@ -225,11 +230,13 @@ class PushFailureRetryTest extends TestCase
     {
         fwrite(STDERR, "  → Testing a successful push neither fails nor throws...\n");
 
+        /** @var LokiClient&MockInterface $client */
         $client = Mockery::mock(LokiClient::class);
         $client->shouldReceive('push')->once()->andReturn(true);
 
         $job = $this->jobWithClient($client, [$this->anEntry()]);
 
+        /** @var JobContract&MockInterface $queueJob */
         $queueJob = Mockery::mock(JobContract::class);
         $queueJob->shouldNotReceive('fail');
         $queueJob->shouldNotReceive('release');
@@ -246,6 +253,7 @@ class PushFailureRetryTest extends TestCase
     {
         fwrite(STDERR, "  → Testing an empty batch is a no-op...\n");
 
+        /** @var LokiClient&MockInterface $client */
         $client = Mockery::mock(LokiClient::class);
         $client->shouldNotReceive('push');
 
