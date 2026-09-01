@@ -7,6 +7,10 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiStream;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiConnectionException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiPushException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiResponseException;
 use Omniboost\LaravelLoggingLoki\LokiClient;
 use Orchestra\Testbench\TestCase;
 
@@ -70,9 +74,12 @@ class PushErrorReportingTest extends TestCase
         try {
             $client->push($this->sampleStreams());
             $this->fail('Expected push() to throw on a 401 response');
-        } catch (\RuntimeException $e) {
+        } catch (LokiResponseException $e) {
             $this->assertStringContainsString('HTTP 401', $e->getMessage());
             $this->assertStringContainsString('invalid scope', $e->getMessage());
+            $this->assertSame(401, $e->getStatusCode());
+            $this->assertStringContainsString('invalid scope', $e->getResponseBody());
+            $this->assertFalse($e->isRetryable());
         }
 
         fwrite(STDERR, "    ✓ exception message contains the 401 status and response body\n");
@@ -92,9 +99,10 @@ class PushErrorReportingTest extends TestCase
         try {
             $client->push($this->sampleStreams());
             $this->fail('Expected push() to throw on a connection failure');
-        } catch (\RuntimeException $e) {
+        } catch (LokiConnectionException $e) {
             $this->assertStringContainsString('Could not reach Loki', $e->getMessage());
             $this->assertStringContainsString('Connection timed out', $e->getMessage());
+            $this->assertSame('http://localhost:3100', $e->getUrl());
         }
 
         fwrite(STDERR, "    ✓ exception names the transport error, not a response\n");
@@ -106,10 +114,16 @@ class PushErrorReportingTest extends TestCase
 
         $client = $this->clientWithResponses([new Response(429, [], 'rate limited')]);
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('HTTP 429');
+        try {
+            $client->push($this->sampleStreams());
+            $this->fail('Expected push() to throw on a 429 response');
+        } catch (LokiResponseException $e) {
+            $this->assertStringContainsString('HTTP 429', $e->getMessage());
+            $this->assertSame(429, $e->getStatusCode());
+            $this->assertTrue($e->isRetryable(), 'A rate limit is worth retrying');
+        }
 
-        $client->push($this->sampleStreams());
+        fwrite(STDERR, "    ✓ 429 throws a retryable LokiResponseException\n");
     }
 
     public function testUnexpectedSuccessStatusThrowsInsteadOfSilentlySucceeding()
@@ -123,8 +137,8 @@ class PushErrorReportingTest extends TestCase
 
         try {
             $client->push($this->sampleStreams());
-            $this->fail('Expected a RuntimeException for a non-204 response');
-        } catch (\RuntimeException $e) {
+            $this->fail('Expected a LokiResponseException for a non-204 response');
+        } catch (LokiResponseException $e) {
             $this->assertStringContainsString('HTTP 260', $e->getMessage());
             $this->assertStringContainsString('unexpected', $e->getMessage());
         }
@@ -143,5 +157,59 @@ class PushErrorReportingTest extends TestCase
         $this->assertTrue($client->push($this->sampleStreams()));
 
         fwrite(STDERR, "    ✓ push() returns true on HTTP 200\n");
+    }
+
+    public function testPushFailuresAreTargetableAsLokiExceptions()
+    {
+        fwrite(STDERR, "\n  → Testing failures can be caught as a Loki exception...\n");
+
+        // The point of the hierarchy: consumers can single out this package's
+        // failures — via the marker interface or the push base class — instead of
+        // catching \RuntimeException and matching on the message.
+        $client = $this->clientWithResponses([new Response(500, [], 'boom')]);
+
+        try {
+            $client->push($this->sampleStreams());
+            $this->fail('Expected push() to throw on a 500 response');
+        } catch (LokiException $e) {
+            $this->assertInstanceOf(LokiPushException::class, $e);
+            $this->assertInstanceOf(LokiResponseException::class, $e);
+            $this->assertTrue($e->isRetryable(), 'A server error is worth retrying');
+        }
+
+        fwrite(STDERR, "    ✓ a push failure is catchable as LokiException / LokiPushException\n");
+    }
+
+    public function testPushFailuresRemainRuntimeExceptionsForExistingCallers()
+    {
+        fwrite(STDERR, "\n  → Testing backwards compatibility with \\RuntimeException...\n");
+
+        // Code written against the previous behaviour must keep working.
+        $client = $this->clientWithResponses([new Response(400, [], 'bad request')]);
+
+        try {
+            $client->push($this->sampleStreams());
+            $this->fail('Expected push() to throw on a 400 response');
+        } catch (\RuntimeException $e) {
+            $this->assertInstanceOf(LokiException::class, $e);
+        }
+
+        fwrite(STDERR, "    ✓ Loki exceptions still extend \\RuntimeException\n");
+    }
+
+    public function testRejectionKeepsTheGuzzleExceptionAsPrevious()
+    {
+        fwrite(STDERR, "\n  → Testing the underlying Guzzle exception is preserved...\n");
+
+        $client = $this->clientWithResponses([new Response(401, [], 'nope')]);
+
+        try {
+            $client->push($this->sampleStreams());
+            $this->fail('Expected push() to throw on a 401 response');
+        } catch (LokiResponseException $e) {
+            $this->assertInstanceOf(\GuzzleHttp\Exception\RequestException::class, $e->getPrevious());
+        }
+
+        fwrite(STDERR, "    ✓ getPrevious() exposes the original Guzzle exception\n");
     }
 }

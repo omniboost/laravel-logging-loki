@@ -6,6 +6,9 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 use Omniboost\LaravelLoggingLoki\DTOs\LokiPayload;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiConnectionException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiPayloadException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiResponseException;
 
 class LokiClient
 {
@@ -34,11 +37,19 @@ class LokiClient
      * @param array<\Omniboost\LaravelLoggingLoki\DTOs\LokiStream> $streams Array of log streams in Loki format
      * @return bool true when Loki acknowledged the push (HTTP 204)
      *
-     * @throws \RuntimeException with the real reason when the push fails — the
-     *         HTTP status and response body for a rejected request (auth, bad
-     *         request, rate limit, ...), or the transport error when Loki could
-     *         not be reached. The caller (the queue job) lets this propagate so
-     *         the failure is retried and recorded instead of silently dropped.
+     * The caller (the queue job) lets these propagate so the failure is retried
+     * and recorded instead of silently dropped. Every one of them implements
+     * {@see \Omniboost\LaravelLoggingLoki\Exceptions\LokiException} and extends
+     * \RuntimeException, so callers can catch this package's failures
+     * specifically without breaking existing \RuntimeException handling.
+     *
+     * @throws LokiPayloadException when the payload could not be encoded or
+     *         compressed locally — nothing was sent.
+     * @throws LokiResponseException when Loki answered without acknowledging the
+     *         push; carries the HTTP status and response body (auth, bad
+     *         request, rate limit, ...).
+     * @throws LokiConnectionException when Loki could not be reached at all
+     *         (DNS, refused, TLS, timeout).
      */
     public function push(array $streams): bool
     {
@@ -49,7 +60,7 @@ class LokiClient
         $jsonPayload = json_encode(['streams' => $streams]);
 
         if ($jsonPayload === false) {
-            throw new \RuntimeException('Failed to encode payload to JSON');
+            throw LokiPayloadException::encodingFailed(json_last_error_msg());
         }
 
         $options = [
@@ -63,7 +74,7 @@ class LokiClient
             $compressedPayload = gzencode($jsonPayload);
 
             if ($compressedPayload === false) {
-                throw new \RuntimeException('Failed to compress payload');
+                throw LokiPayloadException::compressionFailed();
             }
 
             $options['body'] = $compressedPayload;
@@ -83,17 +94,17 @@ class LokiClient
             // Loki returned an error status (401, 404, 429, 5xx, ...). Surface the
             // status and body it sent back rather than a generic failure.
             if ($e->getResponse() !== null) {
-                throw new \RuntimeException(sprintf(
-                    'Loki rejected the push with HTTP %d: %s',
+                throw new LokiResponseException(
                     $e->getResponse()->getStatusCode(),
-                    trim((string) $e->getResponse()->getBody())
-                ), 0, $e);
+                    trim((string) $e->getResponse()->getBody()),
+                    $e
+                );
             }
 
-            throw new \RuntimeException('Could not reach Loki at ' . $this->url . ': ' . $e->getMessage(), 0, $e);
+            throw LokiConnectionException::forUrl($this->url, $e);
         } catch (GuzzleException $e) {
             // Connection/timeout/DNS failure — there is no response to report.
-            throw new \RuntimeException('Could not reach Loki at ' . $this->url . ': ' . $e->getMessage(), 0, $e);
+            throw LokiConnectionException::forUrl($this->url, $e);
         }
 
         // Guzzle's http_errors only throws on 4xx/5xx, so a response reaching here
@@ -103,11 +114,7 @@ class LokiClient
         $statusCode = $response->getStatusCode();
 
         if ($statusCode !== 204 && $statusCode !== 200) {
-            throw new \RuntimeException(sprintf(
-                'Loki rejected the push with HTTP %d: %s',
-                $statusCode,
-                trim((string) $response->getBody())
-            ));
+            throw new LokiResponseException($statusCode, trim((string) $response->getBody()));
         }
 
         return true;

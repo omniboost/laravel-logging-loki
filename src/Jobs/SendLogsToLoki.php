@@ -102,6 +102,7 @@ class SendLogsToLoki implements ShouldQueue
             $totalEntries = count($this->entries);
 
             Log::channel(config('loki.debug_channel'))->error('SendLogsToLoki job failed', [
+                'exception' => get_class($exception),
                 'error' => $exception->getMessage(),
                 'stream_count' => count($streams),
                 'total_entries' => $totalEntries,

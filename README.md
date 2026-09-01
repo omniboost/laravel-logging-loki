@@ -14,6 +14,7 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 - ✅ **Resilient**: Automatic retries on failure with exponential backoff
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
 - ✅ **Debug Mode**: Optional debug logging for troubleshooting
+- ✅ **Typed Exceptions**: Every failure throws a `LokiException`, so consumers can handle Loki problems specifically
 
 ## Installation
 
@@ -497,6 +498,73 @@ Filter by custom labels:
 ```logql
 {app="laravel", endpoint="/api/users"}
 ```
+
+## Exception Handling
+
+Every exception this package throws implements
+`Omniboost\LaravelLoggingLoki\Exceptions\LokiException`, so you can single out
+Loki failures instead of catching `\Exception` or matching on messages:
+
+```php
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiException;
+
+try {
+    $client->push($streams);
+} catch (LokiException $e) {
+    // Any failure coming from this package
+}
+```
+
+### The hierarchy
+
+| Exception | Thrown when |
+|-----------|-------------|
+| `LokiException` (interface) | Marker implemented by all of the below |
+| `LokiPushException` | Base class for any failed push |
+| `LokiPayloadException` | The payload could not be JSON-encoded or GZIP-compressed locally — nothing was sent |
+| `LokiResponseException` | Loki answered but did not acknowledge the push (401, 404, 429, 5xx, or any non-204/200) |
+| `LokiConnectionException` | Loki could not be reached at all (DNS, connection refused, TLS, timeout) |
+
+All of them extend `\RuntimeException`, so existing `catch (\RuntimeException $e)`
+code around a push keeps working.
+
+### Reacting per failure type
+
+`LokiResponseException` carries the status and body Loki returned, plus
+`isRetryable()` (true for 429 and 5xx). `LokiConnectionException` exposes the URL
+it tried:
+
+```php
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiConnectionException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiPayloadException;
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiResponseException;
+
+try {
+    $client->push($streams);
+} catch (LokiResponseException $e) {
+    if ($e->getStatusCode() === 429) {
+        // Rate limited — back off
+    } elseif ($e->getStatusCode() === 401) {
+        // Credentials are wrong — alert, retrying will not help
+    }
+
+    report($e->getResponseBody());
+} catch (LokiConnectionException $e) {
+    // Loki is unreachable at $e->getUrl()
+} catch (LokiPayloadException $e) {
+    // A log line could not be encoded — retrying the same payload will fail again
+}
+```
+
+The original Guzzle exception, when there is one, is available through
+`$e->getPrevious()`.
+
+### In the queue job
+
+`SendLogsToLoki` deliberately lets these exceptions propagate so the queue
+retries the push (3 tries, 10s backoff) and records the real reason in
+`failed_jobs`. To handle them centrally, match on the exception class in your
+application's exception handler or in a queue `JobFailed` listener.
 
 ## Troubleshooting
 
