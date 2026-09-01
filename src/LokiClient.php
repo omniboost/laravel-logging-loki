@@ -31,7 +31,7 @@ class LokiClient
     /**
      * Push logs to Loki.
      *
-     * @param array<LokiStream> $streams Array of log streams in Loki format
+     * @param array<\Omniboost\LaravelLoggingLoki\DTOs\LokiStream> $streams Array of log streams in Loki format
      * @return bool true when Loki acknowledged the push (HTTP 204)
      *
      * @throws \RuntimeException with the real reason when the push fails — the
@@ -78,7 +78,7 @@ class LokiClient
         }
 
         try {
-            $this->httpClient->post($this->url . '/loki/api/v1/push', $options);
+            $response = $this->httpClient->post($this->url . '/loki/api/v1/push', $options);
         } catch (RequestException $e) {
             // Loki returned an error status (401, 404, 429, 5xx, ...). Surface the
             // status and body it sent back rather than a generic failure.
@@ -96,8 +96,20 @@ class LokiClient
             throw new \RuntimeException('Could not reach Loki at ' . $this->url . ': ' . $e->getMessage(), 0, $e);
         }
 
-        // No exception means a 2xx/3xx response (Guzzle's http_errors throws on
-        // 4xx/5xx), so the push was accepted.
+        // Guzzle's http_errors only throws on 4xx/5xx, so a response reaching here
+        // still has to be checked: Loki acknowledges a push with 204 (200 from
+        // some proxies). Anything else is not an acknowledgement, so fail loudly
+        // and let the job's retry/error path handle it instead of dropping logs.
+        $statusCode = $response->getStatusCode();
+
+        if ($statusCode !== 204 && $statusCode !== 200) {
+            throw new \RuntimeException(sprintf(
+                'Loki rejected the push with HTTP %d: %s',
+                $statusCode,
+                trim((string) $response->getBody())
+            ));
+        }
+
         return true;
     }
 }

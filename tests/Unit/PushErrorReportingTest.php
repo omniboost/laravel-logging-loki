@@ -111,4 +111,37 @@ class PushErrorReportingTest extends TestCase
 
         $client->push($this->sampleStreams());
     }
+
+    public function testUnexpectedSuccessStatusThrowsInsteadOfSilentlySucceeding()
+    {
+        fwrite(STDERR, "\n  → Testing an unacknowledged 2xx throws...\n");
+
+        // Guzzle only throws on 4xx/5xx, so an odd 2xx (a proxy, a misrouted
+        // endpoint) used to be reported as a successful push and the logs were
+        // dropped. It has to fail so the job retries instead.
+        $client = $this->clientWithResponses([new Response(260, [], 'unexpected')]);
+
+        try {
+            $client->push($this->sampleStreams());
+            $this->fail('Expected a RuntimeException for a non-204 response');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('HTTP 260', $e->getMessage());
+            $this->assertStringContainsString('unexpected', $e->getMessage());
+        }
+
+        fwrite(STDERR, "    ✓ push() throws on a 2xx status Loki never acknowledges with\n");
+    }
+
+    public function testPushAcceptedOnHttp200()
+    {
+        fwrite(STDERR, "\n  → Testing HTTP 200 is accepted...\n");
+
+        // Loki answers 204, but proxies in front of it commonly rewrite that to
+        // 200 — that still means the push landed.
+        $client = $this->clientWithResponses([new Response(200)]);
+
+        $this->assertTrue($client->push($this->sampleStreams()));
+
+        fwrite(STDERR, "    ✓ push() returns true on HTTP 200\n");
+    }
 }
