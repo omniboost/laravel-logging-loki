@@ -14,7 +14,7 @@ A Laravel logging library that sends logs to Grafana Loki using buffered, non-bl
 - ✅ **Resilient**: Automatic retries on failure with exponential backoff
 - ✅ **Label Support**: Add custom labels for better log organization in Grafana
 - ✅ **Debug Mode**: Optional debug logging for troubleshooting
-- ✅ **Typed Exceptions**: Every failure throws a `LokiException`, so consumers can handle Loki problems specifically
+- ✅ **Typed Exceptions**: `LokiClient::push()` reports the failures it classifies as a `LokiException`, so consumers can handle Loki push problems specifically
 
 ## Installation
 
@@ -43,6 +43,7 @@ LOKI_FLUSH_INTERVAL=5.0
 LOKI_QUEUE=default
 LOKI_LOG_LEVEL=debug
 LOKI_DEBUG=false
+LOKI_DEBUG_CHANNEL=stderr
 LOKI_GZIP_COMPRESSION=true
 LOKI_STRUCTURED_METADATA_PREFIX=
 ```
@@ -315,7 +316,8 @@ This library uses a two-tier buffering system for optimal performance:
 | `flush_interval` | Seconds before flushing cache buffer | `5.0` |
 | `queue` | Queue to use for background jobs | `default` |
 | `level` | Minimum log level | `debug` |
-| `debug` | Enable debug logging | `false` |
+| `debug` | Report what the package is doing (failures are reported regardless) | `false` |
+| `debug_channel` | Loop-safe log channel for the package's own diagnostics; `null` uses `error_log()` | `null` |
 | `labels` | Default labels for all logs | `['app', 'env', 'server']` |
 | `structured_metadata_prefix` | Prefix for extracting structured metadata from context | `''` (empty = all context) |
 | `labels_prefix` | Prefix for extracting labels from context | `'label_'` |
@@ -501,9 +503,11 @@ Filter by custom labels:
 
 ## Exception Handling
 
-Every exception this package throws implements
+The failures `LokiClient::push()` classifies — a payload it could not encode, a
+response Loki did not acknowledge with, a Loki it could not reach — are thrown as
+exceptions implementing
 `Omniboost\LaravelLoggingLoki\Exceptions\LokiException`, so you can single out
-Loki failures instead of catching `\Exception` or matching on messages:
+a failed push instead of catching `\Exception` or matching on messages:
 
 ```php
 use Omniboost\LaravelLoggingLoki\Exceptions\LokiException;
@@ -511,7 +515,7 @@ use Omniboost\LaravelLoggingLoki\Exceptions\LokiException;
 try {
     $client->push($streams);
 } catch (LokiException $e) {
-    // Any failure coming from this package
+    // Any push failure this client classifies
 }
 ```
 
@@ -527,6 +531,14 @@ try {
 
 All of them extend `\RuntimeException`, so existing `catch (\RuntimeException $e)`
 code around a push keeps working.
+
+The guarantee is scoped to the `LokiClient::push()` API boundary and to those
+three cases. Other code paths in the package are not wrapped: the buffered
+handler and the shutdown flusher swallow or report their own errors rather than
+throwing, and a native error raised somewhere else — a cache or Redis driver
+failure, a `\TypeError`, an `\Error` from PHP itself — is *not* converted into a
+`LokiException`. Catch `LokiException` to handle a failed push; keep a broader
+`\Throwable` handler for everything else.
 
 ### Reacting per failure type
 
@@ -566,13 +578,76 @@ retries the push (3 tries, 10s backoff) and records the real reason in
 `failed_jobs`. To handle them centrally, match on the exception class in your
 application's exception handler or in a queue `JobFailed` listener.
 
+## Self-Logging
+
+This package never reports its own failures through Laravel's default log
+channel, and neither should your application. When the Loki channel is part of
+the default channel - the usual setup, eg. `LOG_CHANNEL=stderr,omniboost:loki` -
+a Loki failure written with `Log::error()` is buffered for Loki, dispatches
+another push job, fails again, and reports that failure the same way. Nothing
+recurses infinitely because the push is queued, but every outage amplifies itself
+until the buffer or the queue gives out.
+
+Every logging library keeps a separate sink for this reason: log4j2's
+`StatusLogger`, logback's `StatusManager`, Serilog's `SelfLog`, Python's
+`Handler.handleError()`, Fluentd's reserved `@FLUENT_LOG` label. This package's
+is `Omniboost\LaravelLoggingLoki\Support\SelfLog`, and it writes to
+`error_log()` - stderr in a container, which the log driver is already collecting.
+
+### What is reported where
+
+| Failure | Reported to |
+|---------|-------------|
+| A handler that cannot write (Monolog `setExceptionHandler`) | `SelfLog`, record dropped, caller unaffected |
+| A record emitted while a write is in progress (recursion guard) | `SelfLog`, record dropped |
+| A memory buffer that cannot be flushed | `error_log()` directly (runs at shutdown) |
+| `SendLogsToLoki` exhausting its retries | `SelfLog`, regardless of `LOKI_DEBUG` |
+| A push attempt that throws inside the job | The queue's own retry/`failed_jobs` handling |
+
+### Sending diagnostics somewhere you already read
+
+Set `LOKI_DEBUG_CHANNEL` to a channel that does not resolve to the Loki driver:
+
+```env
+LOKI_DEBUG_CHANNEL=stderr
+```
+
+One that does - directly, or through a stack, including the stack built from
+`LOG_CHANNEL` - is refused with a line in the error log, which is used instead.
+Do not rely on that check: it is a guard rail, not a configuration option.
+
+### In your application
+
+The one thing this package cannot cover is your application reporting a Loki
+failure through the log. `SendLogsToLoki` lets its exceptions propagate so the
+queue retries them, and a queue worker reports a failed job through Laravel's
+exception handler - which writes to the default channel, which is where Loki is.
+Exclude the package's exceptions from that path:
+
+```php
+use Omniboost\LaravelLoggingLoki\Exceptions\LokiException;
+
+->withExceptions(function (Exceptions $exceptions) {
+    $exceptions->report(function (Throwable $e) {
+        if ($e instanceof LokiException) {
+            error_log('[loki] ' . $e->getMessage());
+
+            // Stops Laravel logging it to the default channel.
+            return false;
+        }
+    });
+})
+```
+
 ## Troubleshooting
 
 ### Logs not appearing in Loki
 
 1. Check queue is running: `php artisan queue:work`
-2. Enable debug mode: `LOKI_DEBUG=true`
-3. Check Laravel logs for errors
+2. Look for `[loki:` lines in the process error log (stderr in a container) -
+   failed pushes are reported there without any configuration, see
+   [Self-Logging](#self-logging)
+3. Enable debug mode: `LOKI_DEBUG=true`
 4. Verify Loki URL is accessible: `curl http://your-loki-url:3100/ready`
 
 ### High memory usage
