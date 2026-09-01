@@ -482,8 +482,10 @@ class MemoryBufferTest extends TestCase
         try {
             $this->invokePrivateMethod($handler, 'bufferLogs', [$entries]);
         } catch (\RuntimeException $e) {
-            // Expected - job may try to send to Loki which will fail in test environment
-            if (!str_contains($e->getMessage(), 'Failed to send logs to Loki')) {
+            // Expected - the sync queue runs the job inline, which tries to reach
+            // Loki and fails in the test environment ("Could not reach Loki ..."
+            // or "Loki rejected the push ...").
+            if (!str_contains($e->getMessage(), 'Loki')) {
                 throw $e; // Re-throw if it's a different error
             }
         }
