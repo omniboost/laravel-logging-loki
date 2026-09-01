@@ -144,10 +144,10 @@ class SelfLoggingTest extends TestCase
 
         $this->assertSame('stderr', SelfLog::channel());
 
-        Log::spy();
+        $log = Log::spy();
         SelfLog::error('something broke');
 
-        Log::shouldHaveReceived('channel')->with('stderr');
+        $log->shouldHaveReceived('channel')->with('stderr');
     }
 
     public function test_a_channel_that_is_the_loki_driver_is_refused(): void
@@ -179,7 +179,7 @@ class SelfLoggingTest extends TestCase
         $this->assertStringContainsString('resolves to the Loki driver', $this->errorLogContents());
     }
 
-    public function test_a_stack_that_contains_itself_does_not_hang(): void
+    public function test_a_stack_that_contains_itself_is_refused_without_hanging(): void
     {
         config()->set('logging.channels.recursive', [
             'driver' => 'stack',
@@ -187,7 +187,10 @@ class SelfLoggingTest extends TestCase
         ]);
         config()->set('loki.debug_channel', 'recursive');
 
-        $this->assertSame('recursive', SelfLog::channel());
+        // The cycle cannot be walked to its leaves, so it cannot be shown to be
+        // Loki-free - and Laravel would recurse into it until the process died.
+        $this->assertNull(SelfLog::channel());
+        $this->assertStringContainsString('resolves to the Loki driver', $this->errorLogContents());
     }
 
     public function test_a_monolog_driver_wrapping_the_loki_handler_is_refused(): void

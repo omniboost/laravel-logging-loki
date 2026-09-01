@@ -617,7 +617,7 @@ failures.
 | A handler that cannot write (Monolog `setExceptionHandler`) | `SelfLog`, record dropped, caller unaffected |
 | A record emitted while a write is in progress (recursion guard) | `error_log()` directly, record dropped |
 | A memory buffer that cannot be flushed | `error_log()` directly (runs at shutdown) |
-| `SendLogsToLoki` exhausting its retries | `SelfLog`, regardless of `LOKI_DEBUG` |
+| `SendLogsToLoki` exhausting its retries, or failing on a permanent error before they run out | `SelfLog`, regardless of `LOKI_DEBUG` |
 | A push attempt that throws inside the job | The queue's own retry/`failed_jobs` handling |
 
 ### Sending diagnostics somewhere you already read

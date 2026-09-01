@@ -141,8 +141,13 @@ final class SelfLog
      *
      * Follows stack channels down to their leaves. Laravel accepts a
      * comma-separated string for a stack's channels (LogManager::createStackDriver
-     * explodes it), so that shape is followed as well. $seen breaks the cycle a
-     * stack that contains itself would otherwise cause.
+     * explodes it), so that shape is followed as well.
+     *
+     * A stack that contains itself is reported as reaching Loki. $seen has to
+     * break the cycle to terminate, but the branch it breaks cannot be shown to
+     * be Loki-free, and the whole class errs towards the error log when it cannot
+     * tell. Laravel would recurse into such a stack until the process died
+     * anyway, so it is not a channel to hand diagnostics to.
      *
      * Three shapes reach the Loki handler: this package's own driver, and
      * Laravel's 'monolog' driver pointed at LokiBufferedLogger (the handler the
@@ -153,7 +158,7 @@ final class SelfLog
     private static function reachesLoki(string $name, array $channels, array $seen = []): bool
     {
         if (isset($seen[$name])) {
-            return false;
+            return true;
         }
 
         $seen[$name] = true;
